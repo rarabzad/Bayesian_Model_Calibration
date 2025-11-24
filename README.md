@@ -1,16 +1,166 @@
-## 1. Priors — expressing what you believe before data
+## Goals
 
-### Purpose
+* Give a **clear intuition** for Bayesian thinking.
+* Teach a **practical calibration workflow** (prior → likelihood → posterior → checks).
+* Provide short exercises and a checklist to run real calibrations.
+
+## Audience
+
+Practitioners who want to calibrate models (hydrology, ecology, engineering, etc.) with uncertainty — no deep Bayesian background required.
+
+---
+
+# 1. Quick Bayesian intuition
+
+* **Bayes = update beliefs with data.**
+* Start with what you *think* (prior), see data (likelihood), get what you *believe now* (posterior).
+
+### Bayes' rule (compact)
+
+$$p(\theta\mid y) = \frac{p(y\mid \theta)\,p(\theta)}{p(y)}$$
+
+* $p(\theta)$: prior (what you believed before seeing data).
+* $p(y\mid\theta)$: likelihood (how likely the data are given parameters).
+* $p(\theta\mid y)$: posterior (updated belief).
+* $p(y)$: normalizing constant (marginal likelihood).
+
+---
+
+# 2. Key terms — one-line cheatsheet
+
+* **Prior**: beliefs about parameters before data.
+* **Likelihood**: model of the data given parameters.
+* **Posterior**: updated distribution of parameters.
+* **Predictive (posterior predictive)**: distribution of new data given the posterior.
+* **MCMC / HMC / NUTS**: algorithms to sample from the posterior.
+* **Credible interval**: Bayesian interval for parameter values (e.g., 95% credible interval).
+* **PP-checks**: simulate replicated data from posterior; compare to observed.
+
+---
+
+# 3. Bayesian calibration — the practical workflow
+
+1. **Define model (process + noise).** What generates data? Which parameters matter?
+2. **Choose priors.** Document choices and reasons.
+3. **Specify likelihood.** E.g., Normal errors, log-Normal, Poisson — match data type and error structure.
+4. **Fit (compute posterior).** Use sampling (MCMC) or approximation (VI).
+5. **Check diagnostics.** Convergence (R̂, ESS), trace plots, divergences.
+6. **Posterior predictive checks.** Does the model reproduce key data features?
+7. **Summarize & report.** Posterior summaries, credible intervals, predictive uncertainty.
+8. **(Optional) Model comparison & robustness.** LOO, WAIC, sensitivity to priors.
+
+---
+
+# 4. Intuitive guide to each component
+
+## 4.1 Priors — minimal words, maximum clarity
+
+* **Purpose**: regularize estimation, incorporate prior knowledge, avoid nonsense.
+* **Types**: informative (strong knowledge), weakly informative (mild constraints), non-informative (flat).
+* **Rule of thumb**: prefer weakly informative priors that rule out impossible values but don't force a result.
+* **Document** your prior choices and test sensitivity by changing them.
+
+## 4.2 Likelihood — what matters
+
+* Choose a likelihood that reflects measurement error and process noise.
+* Consider transformations (log for multiplicative errors).
+* If residuals show heteroscedasticity or heavy tails, use appropriate error models (e.g., Student-t).
+
+## 4.3 Posterior — what you inspect
+
+* Look at marginal distributions and joint correlations.
+* Check credible intervals for practical significance (not just statistical).
+* Use posterior predictive distributions to inspect model fit in data space.
+
+---
+
+# 5. Inference methods (brief)
+
+* **MCMC (standard)** — accurate but can be slow. HMC / NUTS are efficient for many parameters.
+* **Variational inference (VI)** — approximates posterior fast; can miss tails. Good for large-scale or initial exploration.
+* **Optimization / MAP** — single best point estimate; loses uncertainty.
+
+---
+
+# 6. Diagnostics & checks (must-do list)
+
+* **Convergence**: R̂ ≈ 1, no trends in trace plots.
+* **Mixing**: effective sample size (ESS) sufficiently large.
+* **Divergences** (HMC): fix by reparametrizing or stronger priors.
+* **Posterior predictive checks**: overlay simulated vs observed; check summary stats (means, quantiles, autocorrelation).
+* **Residuals**: visually inspect residuals for bias, heteroscedasticity, autocorrelation.
+* **Sensitivity**: re-run with different priors; check results stable.
+
+---
+
+# 7. Short, practical examples (copy-paste friendly)
+
+### Minimal Stan/brms-style pseudocode (concept)
+
+```r
+library(brms)
+
+# Define model
+model <- brm(
+  y ~ 1,                                    # formula
+  prior = c(
+    prior(normal(0, 1), class = Intercept), # prior on theta
+    prior(normal(0, 1), class = sigma)      # prior on sigma
+  ),
+  data = data.frame(y = y, x = x),
+  chains = 4, 
+  iter = 2000, 
+  warmup = 1000
+)
+```
+
+### Posterior predictive (concept)
+
+```r
+# Posterior predictive checks
+pp_check(model, ndraws = 100)
+
+# Or manually
+ppc <- posterior_predict(model)
+plot(density(ppc), main = "Posterior Predictive")
+points(y, rep(0, length(y)), col = "red")
+```
+
+> Adapt to your specific model structure and Stan/brms/rstan workflow.
+
+---
+
+# 8. Reporting & reproducibility — checklist
+
+* Save code, seeds, and data.
+* Record priors, likelihood choice, sampler settings, and versions.
+* Include diagnostic plots and posterior predictive checks.
+* Run sensitivity to priors and alternative noise models.
+
+---
+
+# 9. Common pitfalls (quick)
+
+* Overconfident priors that dominate data.
+* Ignoring model misspecification (bad likelihood).
+* Accepting convergence diagnostics without visual checks.
+* Reporting point estimates without uncertainty.
+
+---
+
+# 10. Priors — expressing what you believe before data
+
+## 10.1 Purpose
 
 The **prior** captures what you know (or assume) about parameters before seeing data. It acts as a regularizer, preventing unrealistic parameter values and stabilizing estimation.
 
-### Basic formula
+## 10.2 Basic formula
 
 $$p(\theta) = \text{prior distribution of parameters}$$
 
 where $\theta$ represents model parameters (e.g., hydraulic conductivity, reaction rate, etc.).
 
-### Common types of priors
+## 10.3 Common types of priors
 
 | Type                       | Use case                                              | Example                              |
 | -------------------------- | ----------------------------------------------------- | ------------------------------------ |
@@ -19,7 +169,7 @@ where $\theta$ represents model parameters (e.g., hydraulic conductivity, reacti
 | **Informative**            | when expert knowledge or previous data exist          | LogNormal(mean, sd)                  |
 | **Hierarchical**           | when parameters vary across groups (e.g., catchments) | θᵢ ~ Normal(μ, σ)                    |
 
-### Practical rules
+## 10.4 Practical rules
 
 * Use weakly informative priors as a default.
 * Check the prior predictive distribution — simulate from priors before using data.
@@ -27,19 +177,19 @@ where $\theta$ represents model parameters (e.g., hydraulic conductivity, reacti
 
 ---
 
-## 2. Error Model — describing uncertainty in data
+# 11. Error Model — describing uncertainty in data
 
-### Why it matters
+## 11.1 Why it matters
 
 The **error model** defines how observed data deviate from the model output. This is often where misspecification hides.
 
-### Simple additive error model
+## 11.2 Simple additive error model
 
 $$y_i = f(x_i, \theta) + \varepsilon_i$$
 
 where $\varepsilon_i \sim \mathcal{N}(0, \sigma^2)$
 
-### Multiplicative error model (log-transformed)
+## 11.3 Multiplicative error model (log-transformed)
 
 $$y_i = f(x_i, \theta) \times (1 + \varepsilon_i), \quad \varepsilon_i \sim \mathcal{N}(0, \sigma^2)$$
 
@@ -49,19 +199,19 @@ $$\log(y_i) = \log(f(x_i, \theta)) + \eta_i, \quad \eta_i \sim \mathcal{N}(0, \s
 
 — useful for skewed or strictly positive data.
 
-### Student-t error model (heavy-tailed)
+## 11.4 Student-t error model (heavy-tailed)
 
 $$\varepsilon_i \sim t_\nu(0, \sigma^2)$$
 
 — robust against outliers; $\nu$ controls tail heaviness.
 
-### Heteroscedastic error model
+## 11.5 Heteroscedastic error model
 
 $$\varepsilon_i \sim \mathcal{N}(0, (\sigma_0 + \sigma_1 |f(x_i, \theta)|)^2)$$
 
 — allows larger variance for higher predictions.
 
-### Autocorrelated errors (time series)
+## 11.6 Autocorrelated errors (time series)
 
 $$\varepsilon_t = \phi \varepsilon_{t-1} + \eta_t, \quad \eta_t \sim \mathcal{N}(0, \sigma^2)$$
 
@@ -69,33 +219,33 @@ $$\varepsilon_t = \phi \varepsilon_{t-1} + \eta_t, \quad \eta_t \sim \mathcal{N}
 
 ---
 
-## 3. Likelihood — connecting data and model
+# 12. Likelihood — connecting data and model
 
-### General definition
+## 12.1 General definition
 
 $$p(y \mid \theta) = \prod_{i=1}^{n} p(y_i \mid \theta)$$
 
 $$\log p(y \mid \theta) = \sum_{i=1}^{n} \log p(y_i \mid \theta)$$
 
-### Normal likelihood (additive Gaussian errors)
+## 12.2 Normal likelihood (additive Gaussian errors)
 
 $$y_i \sim \mathcal{N}(f(x_i, \theta), \sigma^2)$$
 
 $$\log p(y \mid \theta) = -\frac{n}{2}\log(2\pi\sigma^2) - \frac{1}{2\sigma^2}\sum_i (y_i - f(x_i, \theta))^2$$
 
-### Log-Normal likelihood (multiplicative errors)
+## 12.3 Log-Normal likelihood (multiplicative errors)
 
 $$\log(y_i) \sim \mathcal{N}(\log(f(x_i, \theta)), \sigma^2)$$
 
 $$\log p(y \mid \theta) = -\frac{n}{2}\log(2\pi\sigma^2) - \sum_i \left( \frac{(\log(y_i) - \log(f_i))^2}{2\sigma^2} + \log(y_i) \right)$$
 
-### Student-t likelihood (robust)
+## 12.4 Student-t likelihood (robust)
 
 $$p(y_i \mid \theta) = \frac{\Gamma((\nu+1)/2)}{\Gamma(\nu/2)\sqrt{\pi\nu}\sigma}\left(1 + \frac{(y_i - f_i)^2}{\nu\sigma^2}\right)^{-(\nu+1)/2}$$
 
 $$\log p(y \mid \theta) = \sum_i \log p(y_i \mid \theta)$$
 
-### Autocorrelated likelihood (AR(1))
+## 12.5 Autocorrelated likelihood (AR(1))
 
 $$\varepsilon_t = y_t - f_t$$
 
@@ -103,13 +253,13 @@ $$\varepsilon_t = \phi \varepsilon_{t-1} + \eta_t, \quad \eta_t \sim \mathcal{N}
 
 $$\log p(y \mid \theta) = -\frac{1}{2}\sum_t \left( \frac{(\varepsilon_t - \phi\varepsilon_{t-1})^2}{\sigma^2} + \log(2\pi\sigma^2) \right)$$
 
-### Heteroscedastic likelihood
+## 12.6 Heteroscedastic likelihood
 
 $$y_i \sim \mathcal{N}(f_i, (\sigma_0 + \sigma_1|f_i|)^2)$$
 
 $$\log p(y \mid \theta) = -\frac{1}{2}\sum_i \left( \frac{(y_i - f_i)^2}{(\sigma_0 + \sigma_1|f_i|)^2} + \log(2\pi(\sigma_0 + \sigma_1|f_i|)^2) \right)$$
 
-### Box–Cox transformation
+## 12.7 Box–Cox transformation
 
 $$y_i^{(\lambda)} = \begin{cases} \frac{y_i^\lambda - 1}{\lambda}, & \lambda \neq 0 \\ \log(y_i), & \lambda = 0 \end{cases}$$
 
@@ -117,9 +267,9 @@ $$y_i^{(\lambda)} \sim \mathcal{N}(f_i^{(\lambda)}, \sigma^2)$$
 
 ---
 
-## 4. Posterior — combining prior and likelihood
+# 13. Posterior — combining prior and likelihood
 
-### Definition
+## 13.1 Definition
 
 $$p(\theta \mid y) = \frac{p(y \mid \theta) p(\theta)}{p(y)}$$
 
@@ -128,13 +278,13 @@ $$p(\theta \mid y) = \frac{p(y \mid \theta) p(\theta)}{p(y)}$$
 * Posterior: $p(\theta \mid y)$
 * Evidence (normalization): $p(y) = \int p(y \mid \theta)p(\theta) d\theta$
 
-### Summaries
+## 13.2 Summaries
 
 * Mean / median of $\theta$
 * 95% credible intervals
 * Posterior predictive checks: $y^{rep} \sim p(y^{rep} \mid \theta^{(s)})$
 
-### Inference methods
+## 13.3 Inference methods
 
 | Method                | Notes                                  |
 | --------------------- | -------------------------------------- |
@@ -144,7 +294,7 @@ $$p(\theta \mid y) = \frac{p(y \mid \theta) p(\theta)}{p(y)}$$
 
 ---
 
-## 5. Conceptual example
+# 14. Conceptual example
 
 $$y_i \sim \mathcal{N}(f(x_i, \theta), \sigma^2)$$
 
