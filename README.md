@@ -413,10 +413,9 @@ legend("topleft", legend = "True relationship",
 
 ### Step 3: Define the log-posterior function
 $$p(\theta\mid y) = \frac{p(y\mid \theta)\,p(\theta)}{p(y)}$$
-![Bayesian Workflow](https://m-clark.github.io/bayesian-basics/Bayesian-Basics_files/figure-html/prior2post_1-1.svg)
+<img src="https://m-clark.github.io/bayesian-basics/Bayesian-Basics_files/figure-html/prior2post_1-1.svg" alt="Bayesian Workflow">
 
 *Figure: Bayesian inference workflow - combining prior beliefs with data to obtain the posterior distribution.*
-
 ```r
 # Log-prior function
 log_prior <- function(theta) {
