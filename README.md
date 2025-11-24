@@ -413,7 +413,7 @@ legend("topleft", legend = "True relationship",
 
 ### Step 3: Define the log-posterior function
 $$p(\theta\mid y) = \frac{p(y\mid \theta)\,p(\theta)}{p(y)}$$
-<img src="https://www.researchgate.net/profile/Heinz-Herwig/publication/258158633/figure/fig9/AS:668853721919488@1536478562054/Likelihood-prior-and-posterior-probability-distribution-for-a-parameter-x.png">
+<img src="https://svmiller.com/images/prior-posterior-likelihood.png">
 
 *Figure: Bayesian inference workflow - combining prior beliefs with data to obtain the posterior distribution.*
 ```r
