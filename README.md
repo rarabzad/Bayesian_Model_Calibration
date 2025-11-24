@@ -684,3 +684,723 @@ par(mfrow = c(1, 1))
 3. **Uncertainty quantification**: 95% credible intervals capture the true parameters and are close to the analytically derived lines
 4. **Prediction**: Posterior predictive checks show the model captures the data well
 5. **Residuals**: Residuals appear random with no systematic patterns
+
+
+# Advanced Bayesian Linear Regression Example
+## Heteroscedastic, Autocorrelated Errors with Box-Cox Transformation
+
+---
+
+## 1. Problem Definition
+
+We want to calibrate a linear regression model with:
+
+1. **Heteroscedastic errors**: Variance increases with predicted values
+2. **Autocorrelated errors**: AR(1) structure in residuals
+3. **Box-Cox transformation**: To handle non-normal response variable
+
+**Model structure:**
+
+$$y = \beta_0 + \beta_1 x + \varepsilon$$
+
+**Error structure:**
+
+$$\varepsilon_t \sim \mathcal{N}(0, \sigma_t^2)$$
+
+where:
+- $\sigma_t = a \cdot \hat{y}_t + b$ (heteroscedasticity)
+- $\varepsilon_t = \phi \varepsilon_{t-1} + \eta_t$, where $\eta_t \sim \mathcal{N}(0, \sigma_t^2)$ (autocorrelation)
+- Box-Cox transformation: $y^{(\lambda)} = \frac{y^\lambda - 1}{\lambda}$ for $\lambda \neq 0$
+
+**Parameters to estimate:**
+- $\beta_0$: intercept
+- $\beta_1$: slope
+- $a$: heteroscedasticity slope
+- $b$: heteroscedasticity intercept
+- $\phi$: AR(1) autocorrelation coefficient
+- $\lambda$: Box-Cox transformation parameter
+
+---
+
+## 2. Synthetic Data Generation
+
+**True parameters:**
+- $\beta_0^{true} = 5.0$ (intercept)
+- $\beta_1^{true} = 2.0$ (slope)
+- $a^{true} = 0.15$ (heteroscedasticity slope)
+- $b^{true} = 0.5$ (heteroscedasticity base)
+- $\phi^{true} = 0.6$ (AR(1) coefficient)
+- $\lambda^{true} = 0.5$ (Box-Cox parameter)
+
+---
+
+## 3. Complete R Implementation
+
+### Step 1: Setup and data generation
+
+```r
+# Install and load packages
+if (!require("adaptMCMC")) install.packages("adaptMCMC")
+if (!require("coda")) install.packages("coda")
+
+library(adaptMCMC)
+library(coda)
+
+set.seed(456)
+
+# True parameters
+beta0_true <- 5.0
+beta1_true <- 2.0
+a_true <- 0.15      # heteroscedasticity slope
+b_true <- 0.5       # heteroscedasticity base
+phi_true <- 0.6     # AR(1) coefficient
+lambda_true <- 0.5  # Box-Cox parameter
+
+# Generate data
+n <- 100
+x <- seq(1, 10, length.out = n)
+
+# Linear predictor (on original scale)
+mu <- beta0_true + beta1_true * x
+
+# Heteroscedastic variance structure
+sigma_t <- a_true * mu + b_true
+
+# Generate AR(1) errors
+eta <- numeric(n)
+eta[1] <- rnorm(1, 0, sigma_t[1] / sqrt(1 - phi_true^2))
+for (t in 2:n) {
+  eta[t] <- phi_true * eta[t-1] + rnorm(1, 0, sigma_t[t])
+}
+
+# Generate observations (on original scale)
+y <- mu + eta
+
+# Ensure positive values for Box-Cox transformation
+y <- pmax(y, 0.1)
+
+# Visualize the data
+par(mfrow = c(2, 2))
+
+# Data with heteroscedasticity
+plot(x, y, pch = 19, col = "steelblue",
+     main = "Observed Data",
+     xlab = "x", ylab = "y")
+lines(x, mu, col = "red", lwd = 2, lty = 2)
+
+# Residuals showing heteroscedasticity
+residuals_raw <- y - mu
+plot(mu, residuals_raw, pch = 19, col = "steelblue",
+     main = "Heteroscedasticity Pattern",
+     xlab = "Fitted values", ylab = "Residuals")
+abline(h = 0, col = "red", lty = 2)
+
+# Autocorrelation in residuals
+plot(residuals_raw[-n], residuals_raw[-1], pch = 19, col = "steelblue",
+     main = "Autocorrelation in Residuals",
+     xlab = expression(epsilon[t]), ylab = expression(epsilon[t+1]))
+abline(lm(residuals_raw[-1] ~ residuals_raw[-n]), col = "red", lwd = 2)
+
+# ACF plot
+acf(residuals_raw, main = "ACF of Residuals")
+
+par(mfrow = c(1, 1))
+```
+
+### Step 2: Define the log-likelihood function
+
+```r
+# Log-likelihood function (provided)
+log_likelihood <- function(obs, sim, a, b, phi, lambda) {
+  n <- length(obs)
+  
+  # Box-Cox transformation
+  if (lambda == 0) {
+    obs_trans <- log(obs)
+    sim_trans <- log(sim)
+  } else {
+    obs_trans <- (obs^lambda - 1) / lambda
+    sim_trans <- (sim^lambda - 1) / lambda
+  }
+  
+  # Heteroscedastic variance
+  sigma <- a * sim + b
+  if (any(sigma <= 0)) return(-Inf)
+  
+  # Standardized residuals
+  eta <- (obs_trans - sim_trans) / sigma
+  
+  # Log-likelihood with AR(1) structure
+  const <- -0.5 * log(2 * pi)
+  var_1 <- 1 / (1 - phi^2)
+  
+  # First observation (stationary distribution)
+  ll_first <- const - 0.5 * log(sigma[1]^2 * var_1) - 0.5 * (eta[1]^2 / var_1)
+  
+  # Remaining observations (AR(1) innovations)
+  if (n >= 2) {
+    innovations <- eta[-1] - phi * eta[-n]
+    ll_rest <- sum(const - 0.5 * log(sigma[-1]^2) - 0.5 * innovations^2)
+  } else {
+    ll_rest <- 0
+  }
+  
+  loglik <- ll_first + ll_rest
+  
+  # Jacobian adjustment for Box-Cox
+  jacobian <- if (lambda != 0) (lambda - 1) * sum(log(obs)) else -sum(log(obs))
+  
+  return(loglik + jacobian)
+}
+```
+
+### Step 3: Define priors and posterior
+
+```r
+# Log-prior function
+log_prior <- function(theta) {
+  beta0 <- theta[1]
+  beta1 <- theta[2]
+  a <- theta[3]
+  b <- theta[4]
+  phi <- theta[5]
+  lambda <- theta[6]
+  
+  # Constraints
+  if (a <= 0) return(-Inf)       # a must be positive
+  if (b <= 0) return(-Inf)       # b must be positive
+  if (abs(phi) >= 1) return(-Inf) # phi must be in (-1, 1) for stationarity
+  
+  # Priors
+  lp_beta0 <- dnorm(beta0, mean = 0, sd = 10, log = TRUE)
+  lp_beta1 <- dnorm(beta1, mean = 0, sd = 10, log = TRUE)
+  lp_a <- dexp(a, rate = 1, log = TRUE)           # Exponential prior for a
+  lp_b <- dexp(b, rate = 1, log = TRUE)           # Exponential prior for b
+  lp_phi <- dunif(phi, min = -0.99, max = 0.99, log = TRUE)  # Uniform on stationary region
+  lp_lambda <- dnorm(lambda, mean = 0, sd = 2, log = TRUE)   # Weakly informative
+  
+  return(lp_beta0 + lp_beta1 + lp_a + lp_b + lp_phi + lp_lambda)
+}
+
+# Log-posterior function
+log_posterior <- function(theta, x, y) {
+  beta0 <- theta[1]
+  beta1 <- theta[2]
+  a <- theta[3]
+  b <- theta[4]
+  phi <- theta[5]
+  lambda <- theta[6]
+  
+  # Compute prior
+  lp <- log_prior(theta)
+  if (is.infinite(lp)) return(lp)
+  
+  # Compute simulated/fitted values
+  sim <- beta0 + beta1 * x
+  
+  # Ensure positive observations for Box-Cox
+  if (any(y <= 0)) return(-Inf)
+  if (any(sim <= 0)) return(-Inf)
+  
+  # Compute log-likelihood
+  ll <- log_likelihood(obs = y, sim = sim, a = a, b = b, phi = phi, lambda = lambda)
+  
+  return(lp + ll)
+}
+```
+
+### Step 4: Run MCMC with adaptMCMC (multiple chains)
+
+```r
+# Number of chains
+n_chains <- 4
+
+# Define different initial values for each chain (dispersed starts)
+# Starting far from the posterior to test convergence
+theta_inits <- list(
+  # Chain 1: Far below true values
+  c(beta0 = 1, beta1 = 0.5, a = 0.05, b = 0.1, phi = -0.5, lambda = -0.5),
+  # Chain 2: Far above true values
+  c(beta0 = 10, beta1 = 4, a = 0.4, b = 1.5, phi = 0.8, lambda = 1.5),
+  # Chain 3: Mixed far values
+  c(beta0 = 8, beta1 = 0.8, a = 0.3, b = 0.2, phi = -0.3, lambda = 1.0),
+  # Chain 4: Another dispersed start
+  c(beta0 = 2, beta1 = 3, a = 0.02, b = 1.0, phi = 0.5, lambda = -0.3)
+)
+
+# Storage for all chains
+mcmc_results <- list()
+samples_list <- list()
+
+# Run MCMC for each chain
+cat("Running MCMC sampling for", n_chains, "chains...\n")
+for (i in 1:n_chains) {
+  cat("  Chain", i, "of", n_chains, "...\n")
+  
+  mcmc_results[[i]] <- MCMC(
+    p = log_posterior,
+    init = theta_inits[[i]],
+    n = 20000,                    # More iterations for complex model
+    adapt = TRUE,
+    acc.rate = 0.234,
+    scale = c(0.5, 0.5, 0.05, 0.05, 0.05, 0.1),  # Initial proposal scales
+    x = x,
+    y = y
+  )
+  
+  cat("    Acceptance rate:", mcmc_results[[i]]$acceptance.rate, "\n")
+}
+
+cat("MCMC sampling complete!\n")
+
+# Extract samples (discard burn-in)
+burn_in <- 5000
+
+for (i in 1:n_chains) {
+  samples_temp <- mcmc_results[[i]]$samples[(burn_in + 1):nrow(mcmc_results[[i]]$samples), ]
+  colnames(samples_temp) <- c("beta0", "beta1", "a", "b", "phi", "lambda")
+  samples_list[[i]] <- as.mcmc(samples_temp)
+}
+
+# Convert to mcmc.list for Gelman-Rubin diagnostics
+samples_mcmc_list <- as.mcmc.list(samples_list)
+
+# Also create a combined samples matrix for other analyses
+samples <- do.call(rbind, lapply(samples_list, as.matrix))
+samples_mcmc <- as.mcmc(samples)
+
+cat("\n=== MCMC DIAGNOSTICS ===\n")
+cat("Total samples per chain (after burn-in):", nrow(samples_list[[1]]), "\n")
+cat("Total samples (all chains):", nrow(samples), "\n")
+```
+
+### Step 5: Check convergence diagnostics
+
+```r
+# ============================================
+# GELMAN-RUBIN DIAGNOSTIC (R-hat statistic)
+# ============================================
+cat("\n=== GELMAN-RUBIN STATISTIC (R-hat) ===\n")
+cat("Values close to 1.0 indicate convergence\n")
+cat("R-hat < 1.1 is generally considered acceptable\n\n")
+
+gelman_diag <- gelman.diag(samples_mcmc_list, autoburnin = FALSE)
+print(gelman_diag)
+
+# Extract R-hat values
+rhat_values <- gelman_diag$psrf[, "Point est."]
+cat("\nR-hat Summary:\n")
+for (i in 1:length(rhat_values)) {
+  param_name <- names(rhat_values)[i]
+  rhat <- rhat_values[i]
+  status <- ifelse(rhat < 1.1, "GOOD", ifelse(rhat < 1.2, "ACCEPTABLE", "POOR"))
+  cat(sprintf("  %-10s: %.4f [%s]\n", param_name, rhat, status))
+}
+
+# Gelman-Rubin plot
+cat("\nGenerating Gelman-Rubin plot...\n")
+gelman.plot(samples_mcmc_list, main = "Gelman-Rubin Convergence Diagnostic")
+
+# ============================================
+# TRACE PLOTS FOR ALL CHAINS
+# ============================================
+cat("\n=== TRACE PLOTS (All Chains) ===\n")
+
+# Overlaid trace plots to visualize chain mixing
+par(mfrow = c(3, 2), mar = c(4, 4, 2, 1))
+
+param_names <- c("beta0", "beta1", "a", "b", "phi", "lambda")
+true_vals <- c(beta0_true, beta1_true, a_true, b_true, phi_true, lambda_true)
+colors <- c("black", "red", "blue", "green")
+
+for (j in 1:6) {
+  plot(NULL, xlim = c(1, nrow(samples_list[[1]])), 
+       ylim = range(sapply(samples_list, function(x) range(x[, j]))),
+       xlab = "Iteration", ylab = param_names[j],
+       main = paste("Trace plot:", param_names[j]))
+  
+  for (i in 1:n_chains) {
+    lines(samples_list[[i]][, j], col = colors[i], lwd = 0.5)
+  }
+  abline(h = true_vals[j], col = "orange", lwd = 2, lty = 2)
+  
+  if (j == 1) {
+    legend("topright", legend = c(paste("Chain", 1:n_chains), "True"), 
+           col = c(colors[1:n_chains], "orange"), lty = c(rep(1, n_chains), 2), 
+           lwd = c(rep(1, n_chains), 2), cex = 0.7)
+  }
+}
+
+par(mfrow = c(1, 1))
+
+# ============================================
+# DENSITY AND TRACE PLOTS (Combined chains)
+# ============================================
+cat("\n=== DENSITY AND TRACE PLOTS ===\n")
+
+par(mfrow = c(6, 2), mar = c(4, 4, 2, 1))
+
+# beta0
+densplot(samples_mcmc[, "beta0"], main = "Density plot: beta0", xlab = "beta0")
+abline(v = beta0_true, col = "red", lwd = 2, lty = 2)
+traceplot(samples_mcmc[, "beta0"], main = "Trace plot: beta0", ylab = "beta0")
+abline(h = beta0_true, col = "red", lwd = 2, lty = 2)
+
+# beta1
+densplot(samples_mcmc[, "beta1"], main = "Density plot: beta1", xlab = "beta1")
+abline(v = beta1_true, col = "red", lwd = 2, lty = 2)
+traceplot(samples_mcmc[, "beta1"], main = "Trace plot: beta1", ylab = "beta1")
+abline(h = beta1_true, col = "red", lwd = 2, lty = 2)
+
+# a
+densplot(samples_mcmc[, "a"], main = "Density plot: a", xlab = "a")
+abline(v = a_true, col = "red", lwd = 2, lty = 2)
+traceplot(samples_mcmc[, "a"], main = "Trace plot: a", ylab = "a")
+abline(h = a_true, col = "red", lwd = 2, lty = 2)
+
+# b
+densplot(samples_mcmc[, "b"], main = "Density plot: b", xlab = "b")
+abline(v = b_true, col = "red", lwd = 2, lty = 2)
+traceplot(samples_mcmc[, "b"], main = "Trace plot: b", ylab = "b")
+abline(h = b_true, col = "red", lwd = 2, lty = 2)
+
+# phi
+densplot(samples_mcmc[, "phi"], main = "Density plot: phi", xlab = "phi")
+abline(v = phi_true, col = "red", lwd = 2, lty = 2)
+traceplot(samples_mcmc[, "phi"], main = "Trace plot: phi", ylab = "phi")
+abline(h = phi_true, col = "red", lwd = 2, lty = 2)
+
+# lambda
+densplot(samples_mcmc[, "lambda"], main = "Density plot: lambda", xlab = "lambda")
+abline(v = lambda_true, col = "red", lwd = 2, lty = 2)
+traceplot(samples_mcmc[, "lambda"], main = "Trace plot: lambda", ylab = "lambda")
+abline(h = lambda_true, col = "red", lwd = 2, lty = 2)
+
+par(mfrow = c(1, 1))
+
+# ============================================
+# EFFECTIVE SAMPLE SIZE
+# ============================================
+cat("\n=== EFFECTIVE SAMPLE SIZE ===\n")
+ess <- effectiveSize(samples_mcmc_list)
+print(ess)
+
+cat("\nEffective Sample Size Summary:\n")
+for (i in 1:length(ess)) {
+  param_name <- names(ess)[i]
+  ess_val <- ess[i]
+  total_samples <- nrow(samples_list[[1]]) * n_chains
+  efficiency <- (ess_val / total_samples) * 100
+  cat(sprintf("  %-10s: %6.0f (%.1f%% efficiency)\n", param_name, ess_val, efficiency))
+}
+
+# ============================================
+# AUTOCORRELATION PLOTS
+# ============================================
+cat("\n=== AUTOCORRELATION PLOTS ===\n")
+
+par(mfrow = c(6, 1), mar = c(4, 4, 2, 1))
+autocorr.plot(samples_mcmc[, "beta0"], main = "Autocorrelation: beta0")
+autocorr.plot(samples_mcmc[, "beta1"], main = "Autocorrelation: beta1")
+autocorr.plot(samples_mcmc[, "a"], main = "Autocorrelation: a")
+autocorr.plot(samples_mcmc[, "b"], main = "Autocorrelation: b")
+autocorr.plot(samples_mcmc[, "phi"], main = "Autocorrelation: phi")
+autocorr.plot(samples_mcmc[, "lambda"], main = "Autocorrelation: lambda")
+par(mfrow = c(1, 1))
+```
+
+### Step 6: Posterior summaries
+
+```r
+# Summary statistics
+cat("\n=== POSTERIOR SUMMARIES ===\n")
+summary(samples_mcmc)
+
+# 95% credible intervals
+cat("\n95% Credible Intervals:\n")
+ci <- apply(samples, 2, quantile, probs = c(0.025, 0.5, 0.975))
+print(ci)
+
+# Posterior means
+posterior_means <- colMeans(samples)
+cat("\nPosterior Means:\n")
+print(posterior_means)
+
+cat("\nTrue Values:\n")
+true_values <- c(beta0 = beta0_true, beta1 = beta1_true, 
+                 a = a_true, b = b_true, 
+                 phi = phi_true, lambda = lambda_true)
+print(true_values)
+
+# Comparison table
+cat("\n=== PARAMETER RECOVERY ===\n")
+comparison <- data.frame(
+  Parameter = names(true_values),
+  True = true_values,
+  Posterior_Mean = posterior_means,
+  CI_Lower = ci[1, ],
+  CI_Upper = ci[3, ],
+  Recovered = (true_values >= ci[1, ]) & (true_values <= ci[3, ])
+)
+print(comparison)
+```
+
+### Step 7: Posterior density plots
+
+```r
+par(mfrow = c(3, 2))
+
+param_names <- c("beta0", "beta1", "a", "b", "phi", "lambda")
+true_vals <- c(beta0_true, beta1_true, a_true, b_true, phi_true, lambda_true)
+
+for (i in 1:6) {
+  hist(samples[, i], breaks = 50, freq = FALSE,
+       col = "lightblue", border = "white",
+       main = paste("Posterior:", param_names[i]),
+       xlab = param_names[i])
+  abline(v = true_vals[i], col = "red", lwd = 2, lty = 2)
+  abline(v = posterior_means[i], col = "blue", lwd = 2)
+  legend("topright", legend = c("True", "Post. mean"),
+         col = c("red", "blue"), lty = c(2, 1), lwd = 2, cex = 0.8)
+}
+
+par(mfrow = c(1, 1))
+```
+
+### Step 8: Posterior predictive checks
+
+```r
+# Generate posterior predictive samples
+n_pred <- 200
+pred_indices <- sample(1:nrow(samples), n_pred)
+
+# Storage for predictions
+y_pred_samples <- matrix(NA, nrow = n_pred, ncol = n)
+
+for (i in 1:n_pred) {
+  idx <- pred_indices[i]
+  beta0_s <- samples[idx, "beta0"]
+  beta1_s <- samples[idx, "beta1"]
+  a_s <- samples[idx, "a"]
+  b_s <- samples[idx, "b"]
+  phi_s <- samples[idx, "phi"]
+  lambda_s <- samples[idx, "lambda"]
+  
+  # Generate predictions
+  mu_s <- beta0_s + beta1_s * x
+  sigma_s <- a_s * mu_s + b_s
+  
+  # Generate AR(1) errors
+  eta_s <- numeric(n)
+  eta_s[1] <- rnorm(1, 0, sigma_s[1] / sqrt(1 - phi_s^2))
+  for (t in 2:n) {
+    eta_s[t] <- phi_s * eta_s[t-1] + rnorm(1, 0, sigma_s[t])
+  }
+  
+  y_pred_samples[i, ] <- mu_s + eta_s
+}
+
+# Posterior predictive plot
+plot(x, y, pch = 19, col = "steelblue", 
+     main = "Posterior Predictive Check",
+     xlab = "x", ylab = "y", ylim = range(c(y, y_pred_samples)))
+
+# Add posterior predictive samples
+for (i in 1:n_pred) {
+  lines(x, y_pred_samples[i, ], col = rgb(0, 0, 0, 0.02))
+}
+
+# Add posterior mean prediction
+y_mean_pred <- posterior_means["beta0"] + posterior_means["beta1"] * x
+lines(x, y_mean_pred, col = "blue", lwd = 2)
+
+# Add true relationship
+lines(x, mu, col = "red", lwd = 2, lty = 2)
+
+# Add data again
+points(x, y, pch = 19, col = "steelblue")
+
+legend("topleft",
+       legend = c("Data", "True", "Post. mean", "Post. samples"),
+       col = c("steelblue", "red", "blue", rgb(0, 0, 0, 0.3)),
+       pch = c(19, NA, NA, NA),
+       lty = c(NA, 2, 1, 1),
+       lwd = c(NA, 2, 2, 1))
+```
+
+### Step 9: Advanced diagnostics
+
+```r
+# Residual analysis using posterior means
+beta0_post <- posterior_means["beta0"]
+beta1_post <- posterior_means["beta1"]
+a_post <- posterior_means["a"]
+b_post <- posterior_means["b"]
+phi_post <- posterior_means["phi"]
+lambda_post <- posterior_means["lambda"]
+
+# Fitted values
+y_fitted <- beta0_post + beta1_post * x
+
+# Apply Box-Cox transformation
+if (lambda_post == 0) {
+  y_trans <- log(y)
+  y_fitted_trans <- log(y_fitted)
+} else {
+  y_trans <- (y^lambda_post - 1) / lambda_post
+  y_fitted_trans <- (y_fitted^lambda_post - 1) / lambda_post
+}
+
+# Heteroscedastic standard deviation
+sigma_post <- a_post * y_fitted + b_post
+
+# Standardized residuals (on transformed scale)
+eta <- (y_trans - y_fitted_trans) / sigma_post
+
+# AR(1) innovations (these SHOULD be independent)
+# eta[t] = phi * eta[t-1] + innovation[t]
+# Therefore: innovation[t] = eta[t] - phi * eta[t-1]
+innovations <- numeric(n)
+innovations[1] <- eta[1] / sqrt(1 / (1 - phi_post^2))  # First observation
+innovations[-1] <- eta[-1] - phi_post * eta[-n]  # AR(1) innovations
+
+# Raw residuals (for comparison - these WILL be autocorrelated)
+residuals_raw <- y - y_fitted
+
+cat("\n=== RESIDUAL DIAGNOSTICS ===\n")
+cat("Raw residuals WILL show autocorrelation (this is expected)\n")
+cat("AR(1) innovations SHOULD NOT show autocorrelation (if model is correct)\n\n")
+
+par(mfrow = c(3, 3))
+
+# === RAW RESIDUALS (WILL BE AUTOCORRELATED) ===
+# Raw residuals vs fitted
+plot(y_fitted, residuals_raw, pch = 19, col = "steelblue",
+     main = "Raw Residuals vs Fitted\n(Expected to show patterns)",
+     xlab = "Fitted", ylab = "Raw Residuals")
+abline(h = 0, col = "red", lty = 2)
+
+# ACF of raw residuals (WILL show autocorrelation)
+acf(residuals_raw, main = "ACF: Raw Residuals\n(Expected autocorrelation)")
+
+# Lag plot of raw residuals
+plot(residuals_raw[-n], residuals_raw[-1], 
+     pch = 19, col = "steelblue",
+     main = "Lag Plot: Raw Residuals\n(Expected correlation)",
+     xlab = expression(epsilon[t]), ylab = expression(epsilon[t+1]))
+fit_raw <- lm(residuals_raw[-1] ~ residuals_raw[-n])
+abline(fit_raw, col = "red", lwd = 2)
+legend("topleft", 
+       legend = sprintf("phi = %.3f", coef(fit_raw)[2]), 
+       bty = "n", cex = 0.9)
+
+# === STANDARDIZED RESIDUALS (eta) ===
+plot(y_fitted, eta, pch = 19, col = "steelblue",
+     main = "Standardized Residuals (eta)\n(Should be homoscedastic)",
+     xlab = "Fitted", ylab = "eta")
+abline(h = 0, col = "red", lty = 2)
+
+# ACF of eta (still autocorrelated by design)
+acf(eta, main = "ACF: Standardized Residuals\n(Still autocorrelated)")
+
+# Lag plot of eta
+plot(eta[-n], eta[-1], 
+     pch = 19, col = "steelblue",
+     main = "Lag Plot: Standardized Residuals",
+     xlab = expression(eta[t]), ylab = expression(eta[t+1]))
+fit_eta <- lm(eta[-1] ~ eta[-n])
+abline(fit_eta, col = "red", lwd = 2)
+legend("topleft", 
+       legend = sprintf("phi = %.3f", coef(fit_eta)[2]), 
+       bty = "n", cex = 0.9)
+
+# === AR(1) INNOVATIONS (SHOULD BE INDEPENDENT) ===
+# Innovations vs fitted
+plot(y_fitted, innovations, pch = 19, col = "steelblue",
+     main = "AR(1) Innovations vs Fitted\n(Should be random)",
+     xlab = "Fitted", ylab = "Innovations")
+abline(h = 0, col = "red", lty = 2)
+
+# ACF of innovations (should show NO autocorrelation)
+acf(innovations, main = "ACF: AR(1) Innovations\n(Should be white noise)")
+
+# Lag plot of innovations (should be random scatter)
+plot(innovations[-n], innovations[-1], 
+     pch = 19, col = "steelblue",
+     main = "Lag Plot: Innovations\n(Should be random)",
+     xlab = expression(nu[t]), ylab = expression(nu[t+1]))
+fit_innov <- lm(innovations[-1] ~ innovations[-n])
+abline(fit_innov, col = "red", lwd = 2)
+legend("topleft", 
+       legend = sprintf("phi = %.3f", coef(fit_innov)[2]), 
+       bty = "n", cex = 0.9)
+
+par(mfrow = c(1, 1))
+
+# Additional diagnostic plots
+par(mfrow = c(2, 2))
+
+# QQ plot of innovations
+qqnorm(innovations, pch = 19, col = "steelblue",
+       main = "Q-Q Plot: AR(1) Innovations")
+qqline(innovations, col = "red", lty = 2)
+
+# Histogram of innovations
+hist(innovations, breaks = 30, col = "lightblue", border = "white",
+     main = "Histogram: AR(1) Innovations", 
+     xlab = "Innovations", freq = FALSE)
+curve(dnorm(x, mean(innovations), sd(innovations)), 
+      add = TRUE, col = "red", lwd = 2)
+
+# Innovations over time
+plot(innovations, type = "l", col = "steelblue",
+     main = "Innovations Over Time",
+     xlab = "Time", ylab = "Innovations")
+abline(h = 0, col = "red", lty = 2)
+
+# PACF of innovations
+pacf(innovations, main = "PACF: AR(1) Innovations")
+
+par(mfrow = c(1, 1))
+
+# Numerical summaries
+cat("\nLjung-Box Test for Innovations (testing for autocorrelation):\n")
+lb_test <- Box.test(innovations, lag = 10, type = "Ljung-Box")
+print(lb_test)
+cat("\nInterpretation: p-value >0.05 suggests no significant autocorrelation (good!)\n")
+
+cat("\nEstimated AR(1) coefficient from lag-1 correlation of innovations:\n")
+cat("  Correlation:", cor(innovations[-1], innovations[-n]), "\n")
+cat("  (Should be close to 0 if AR(1) model is adequate)\n")
+```
+
+---
+
+## 4. Interpretation
+
+### What this advanced model captures:
+
+1. **Heteroscedasticity**: Variance increases with fitted values (captured by parameters `a` and `b`)
+2. **Autocorrelation**: Temporal dependence in residuals (captured by `phi`)
+3. **Non-normality**: Box-Cox transformation handles skewed data (captured by `lambda`)
+
+### Key findings:
+
+- The complex error structure is properly accounted for
+- Standardized residuals should appear approximately independent and homoscedastic
+- The model provides realistic uncertainty quantification that accounts for all sources of variation
+
+### Advantages of this approach:
+
+- More realistic for real-world data (which rarely has simple IID errors)
+- Better predictions with correct uncertainty bounds
+- Honest assessment of parameter uncertainty
+
+---
+
+## 5. Notes
+
+- **Computational cost**: This model is more complex and takes longer to converge
+- **Prior sensitivity**: Test different priors for `phi` and `lambda`
+- **Identifiability**: Ensure sufficient data to estimate all parameters
+- **Model checking**: Always validate with posterior predictive checks
