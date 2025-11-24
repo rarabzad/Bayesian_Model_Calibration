@@ -412,7 +412,8 @@ legend("topleft", legend = "True relationship",
 ```
 
 ### Step 3: Define the log-posterior function
-![Bayesian Workflow](https://miro.medium.com/v2/resize:fit:1400/format:webp/1*Erdj9OOCQ9aFZoroy1hCbw.png)
+$$p(\theta\mid y) = \frac{p(y\mid \theta)\,p(\theta)}{p(y)}$$
+![Bayesian Workflow](https://i.sstatic.net/U1Uxd.png)
 
 *Figure: Bayesian inference workflow - combining prior beliefs with data to obtain the posterior distribution.*
 
