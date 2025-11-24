@@ -305,3 +305,371 @@ Posterior:
 $$p(\theta,\sigma \mid y) \propto \prod_i \mathcal{N}(y_i \mid f(x_i,\theta),\sigma^2) \times \mathcal{N}(\theta\mid 0,1) \times \text{HalfNormal}(\sigma\mid 1)$$
 
 Sample with MCMC → posterior predictive checks.
+
+
+# Bayesian Linear Regression Example 
+
+## 1. Problem Definition
+
+We want to calibrate a simple linear regression model:
+
+$$y = \beta_0 + \beta_1 x + \varepsilon$$
+
+where:
+- $\beta_0$ is the intercept
+- $\beta_1$ is the slope
+- $\varepsilon \sim \mathcal{N}(0, \sigma^2)$ is Gaussian noise
+
+**Goal**: Estimate the parameters $\theta = (\beta_0, \beta_1, \sigma)$ from observed data using Bayesian inference.
+
+---
+
+## 2. Synthetic Data Generation
+
+We'll create synthetic data using known "true" parameters:
+
+**True parameters:**
+- $\beta_0^{true} = 2.5$ (intercept)
+- $\beta_1^{true} = 1.8$ (slope)
+- $\sigma^{true} = 1.2$ (noise standard deviation)
+
+**Data generation process:**
+1. Generate $n = 50$ values of $x$ uniformly between 0 and 10
+2. Compute $y = 2.5 + 1.8x + \varepsilon$, where $\varepsilon \sim \mathcal{N}(0, 1.2^2)$
+
+---
+
+## 3. Bayesian Model Specification
+
+### 3.1 Priors
+
+We choose weakly informative priors that allow a wide range of reasonable values:
+
+$$\beta_0 \sim \mathcal{N}(0, 10^2)$$
+$$\beta_1 \sim \mathcal{N}(0, 10^2)$$
+$$\sigma \sim \text{HalfNormal}(5)$$
+
+The HalfNormal prior for $\sigma$ ensures it stays positive (standard deviations must be > 0).
+
+### 3.2 Likelihood
+
+With Gaussian homoscedastic (constant variance) and non-autocorrelated errors:
+
+$$y_i \sim \mathcal{N}(\beta_0 + \beta_1 x_i, \sigma^2)$$
+
+The log-likelihood is:
+
+$$\log p(y \mid \beta_0, \beta_1, \sigma) = -\frac{n}{2}\log(2\pi\sigma^2) - \frac{1}{2\sigma^2}\sum_{i=1}^{n}(y_i - \beta_0 - \beta_1 x_i)^2$$
+
+### 3.3 Posterior
+
+By Bayes' theorem:
+
+$$p(\beta_0, \beta_1, \sigma \mid y) \propto p(y \mid \beta_0, \beta_1, \sigma) \times p(\beta_0) \times p(\beta_1) \times p(\sigma)$$
+
+The posterior combines:
+- The likelihood (how well parameters explain the data)
+- The priors (our initial beliefs about parameters)
+
+---
+
+## 4. R Code Implementation with adaptMCMC
+
+### Step 1: Install and load required packages
+
+```r
+# Install packages if needed
+if (!require("adaptMCMC")) install.packages("adaptMCMC")
+if (!require("coda")) install.packages("coda")
+
+# Load libraries
+library(adaptMCMC)
+library(coda)
+```
+
+### Step 2: Generate synthetic data
+
+```r
+set.seed(123)  # For reproducibility
+
+# True parameters
+beta0_true <- 2.5
+beta1_true <- 1.8
+sigma_true <- 1.2
+
+# Generate data
+n <- 50
+x <- runif(n, min = 0, max = 10)
+y <- beta0_true + beta1_true * x + rnorm(n, mean = 0, sd = sigma_true)
+
+# Visualize the data
+plot(x, y, pch = 19, col = "steelblue", 
+     xlab = "x", ylab = "y", 
+     main = "Synthetic Data for Linear Regression")
+abline(a = beta0_true, b = beta1_true, col = "red", lwd = 2, lty = 2)
+legend("topleft", legend = "True relationship", 
+       col = "red", lty = 2, lwd = 2)
+```
+
+### Step 3: Define the log-posterior function
+
+```r
+# Log-prior function
+log_prior <- function(theta) {
+  beta0 <- theta[1]
+  beta1 <- theta[2]
+  sigma <- theta[3]
+  
+  # Priors: beta0 ~ N(0, 10^2), beta1 ~ N(0, 10^2), sigma ~ HalfNormal(5)
+  if (sigma <= 0) return(-Inf)  # Ensure sigma > 0
+  
+  lp_beta0 <- dnorm(beta0, mean = 0, sd = 10, log = TRUE)
+  lp_beta1 <- dnorm(beta1, mean = 0, sd = 10, log = TRUE)
+  # HalfNormal(5) is equivalent to |N(0, 5^2)|
+  lp_sigma <- dnorm(sigma, mean = 0, sd = 5, log = TRUE) + log(2)
+  
+  return(lp_beta0 + lp_beta1 + lp_sigma)
+}
+
+# Log-likelihood function
+log_likelihood <- function(theta, x, y) {
+  beta0 <- theta[1]
+  beta1 <- theta[2]
+  sigma <- theta[3]
+  
+  # Predicted values
+  y_pred <- beta0 + beta1 * x
+  
+  # Log-likelihood: sum of log-densities
+  ll <- sum(dnorm(y, mean = y_pred, sd = sigma, log = TRUE))
+  
+  return(ll)
+}
+
+# Log-posterior = log-prior + log-likelihood
+log_posterior <- function(theta, x, y) {
+  lp <- log_prior(theta)
+  if (is.infinite(lp)) return(lp)  # Don't compute likelihood if prior is -Inf
+  
+  ll <- log_likelihood(theta, x, y)
+  return(lp + ll)
+}
+```
+
+### Step 4: Run MCMC sampling with adaptMCMC
+
+```r
+# Initial values for parameters (starting point for MCMC)
+theta_init <- c(0, 0, 1)  # (beta0, beta1, sigma)
+
+# Run adaptive MCMC
+# adaptMCMC automatically tunes the proposal distribution
+mcmc_result <- MCMC(
+  p = log_posterior,           # log-posterior function
+  init = theta_init,           # initial values
+  n = 10000,                   # number of iterations
+  adapt = TRUE,                # enable adaptive sampling
+  acc.rate = 0.234,            # target acceptance rate
+  scale = c(0.5, 0.5, 0.2),   # initial proposal scales
+  x = x,                       # pass data to log_posterior
+  y = y
+)
+
+# Extract samples (discard burn-in)
+burn_in <- 2000
+samples <- mcmc_result$samples[(burn_in + 1):nrow(mcmc_result$samples), ]
+colnames(samples) <- c("beta0", "beta1", "sigma")
+
+# Convert to coda mcmc object for diagnostics
+samples_mcmc <- as.mcmc(samples)
+```
+
+### Step 5: Check convergence diagnostics
+
+```r
+# Trace plots
+par(mfrow = c(3, 1))
+plot(samples_mcmc[, "beta0"], main = "Trace plot: beta0", ylab = "beta0")
+abline(h = beta0_true, col = "red", lwd = 2, lty = 2)
+
+plot(samples_mcmc[, "beta1"], main = "Trace plot: beta1", ylab = "beta1")
+abline(h = beta1_true, col = "red", lwd = 2, lty = 2)
+
+plot(samples_mcmc[, "sigma"], main = "Trace plot: sigma", ylab = "sigma")
+abline(h = sigma_true, col = "red", lwd = 2, lty = 2)
+par(mfrow = c(1, 1))
+
+# Acceptance rate
+cat("Acceptance rate:", mcmc_result$acceptance.rate, "\n")
+
+# Effective sample size
+effectiveSize(samples_mcmc)
+
+# Autocorrelation
+par(mfrow = c(3, 1))
+autocorr.plot(samples_mcmc[, "beta0"], main = "Autocorrelation: beta0")
+autocorr.plot(samples_mcmc[, "beta1"], main = "Autocorrelation: beta1")
+autocorr.plot(samples_mcmc[, "sigma"], main = "Autocorrelation: sigma")
+par(mfrow = c(1, 1))
+```
+
+### Step 6: Summarize posterior distributions
+
+```r
+# Posterior summaries
+summary(samples_mcmc)
+
+# 95% credible intervals
+apply(samples, 2, quantile, probs = c(0.025, 0.5, 0.975))
+
+# Posterior means
+posterior_means <- colMeans(samples)
+cat("\nPosterior means:\n")
+print(posterior_means)
+
+cat("\nTrue values:\n")
+print(c(beta0 = beta0_true, beta1 = beta1_true, sigma = sigma_true))
+```
+
+### Step 7: Posterior density plots
+
+```r
+par(mfrow = c(2, 2))
+
+# Beta0
+hist(samples[, "beta0"], breaks = 50, freq = FALSE, 
+     col = "lightblue", border = "white",
+     main = "Posterior: beta0", xlab = "beta0")
+abline(v = beta0_true, col = "red", lwd = 2, lty = 2)
+abline(v = posterior_means["beta0"], col = "blue", lwd = 2)
+legend("topright", legend = c("True", "Posterior mean"), 
+       col = c("red", "blue"), lty = c(2, 1), lwd = 2)
+
+# Beta1
+hist(samples[, "beta1"], breaks = 50, freq = FALSE, 
+     col = "lightblue", border = "white",
+     main = "Posterior: beta1", xlab = "beta1")
+abline(v = beta1_true, col = "red", lwd = 2, lty = 2)
+abline(v = posterior_means["beta1"], col = "blue", lwd = 2)
+legend("topright", legend = c("True", "Posterior mean"), 
+       col = c("red", "blue"), lty = c(2, 1), lwd = 2)
+
+# Sigma
+hist(samples[, "sigma"], breaks = 50, freq = FALSE, 
+     col = "lightblue", border = "white",
+     main = "Posterior: sigma", xlab = "sigma")
+abline(v = sigma_true, col = "red", lwd = 2, lty = 2)
+abline(v = posterior_means["sigma"], col = "blue", lwd = 2)
+legend("topright", legend = c("True", "Posterior mean"), 
+       col = c("red", "blue"), lty = c(2, 1), lwd = 2)
+
+# Joint posterior (beta0 vs beta1)
+plot(samples[, "beta0"], samples[, "beta1"], 
+     pch = ".", col = rgb(0, 0, 1, 0.1),
+     xlab = "beta0", ylab = "beta1",
+     main = "Joint Posterior: beta0 vs beta1")
+points(beta0_true, beta1_true, col = "red", pch = 19, cex = 2)
+points(posterior_means["beta0"], posterior_means["beta1"], 
+       col = "blue", pch = 19, cex = 2)
+legend("topright", legend = c("True", "Posterior mean"), 
+       col = c("red", "blue"), pch = 19)
+
+par(mfrow = c(1, 1))
+```
+
+### Step 8: Posterior predictive checks
+
+```r
+# Generate posterior predictive samples
+n_pred <- 100  # Number of posterior samples to use
+pred_indices <- sample(1:nrow(samples), n_pred)
+
+# Create prediction grid
+x_pred <- seq(0, 10, length.out = 100)
+
+# Storage for predictions
+y_pred_samples <- matrix(NA, nrow = n_pred, ncol = length(x_pred))
+
+for (i in 1:n_pred) {
+  idx <- pred_indices[i]
+  beta0_s <- samples[idx, "beta0"]
+  beta1_s <- samples[idx, "beta1"]
+  sigma_s <- samples[idx, "sigma"]
+  
+  # Generate predictions with uncertainty
+  y_mean <- beta0_s + beta1_s * x_pred
+  y_pred_samples[i, ] <- rnorm(length(x_pred), mean = y_mean, sd = sigma_s)
+}
+
+# Plot posterior predictive distribution
+plot(x, y, pch = 19, col = "steelblue",
+     xlab = "x", ylab = "y",
+     main = "Posterior Predictive Check")
+
+# Add posterior predictive samples (light lines)
+for (i in 1:n_pred) {
+  lines(x_pred, y_pred_samples[i, ], col = rgb(0, 0, 0, 0.05))
+}
+
+# Add posterior mean prediction
+y_mean_pred <- posterior_means["beta0"] + posterior_means["beta1"] * x_pred
+lines(x_pred, y_mean_pred, col = "blue", lwd = 2)
+
+# Add true relationship
+abline(a = beta0_true, b = beta1_true, col = "red", lwd = 2, lty = 2)
+
+# Add data points again (on top)
+points(x, y, pch = 19, col = "steelblue")
+
+legend("topleft", 
+       legend = c("Data", "True relationship", "Posterior mean", "Posterior samples"),
+       col = c("steelblue", "red", "blue", rgb(0, 0, 0, 0.3)),
+       pch = c(19, NA, NA, NA),
+       lty = c(NA, 2, 1, 1),
+       lwd = c(NA, 2, 2, 1))
+```
+
+### Step 9: Residual analysis
+
+```r
+# Calculate residuals using posterior mean parameters
+y_fitted <- posterior_means["beta0"] + posterior_means["beta1"] * x
+residuals <- y - y_fitted
+
+# Residual plots
+par(mfrow = c(2, 2))
+
+# Residuals vs fitted
+plot(y_fitted, residuals, pch = 19, col = "steelblue",
+     xlab = "Fitted values", ylab = "Residuals",
+     main = "Residuals vs Fitted")
+abline(h = 0, col = "red", lty = 2)
+
+# Residuals vs x
+plot(x, residuals, pch = 19, col = "steelblue",
+     xlab = "x", ylab = "Residuals",
+     main = "Residuals vs x")
+abline(h = 0, col = "red", lty = 2)
+
+# QQ plot
+qqnorm(residuals, pch = 19, col = "steelblue")
+qqline(residuals, col = "red", lty = 2)
+
+# Histogram of residuals
+hist(residuals, breaks = 20, col = "lightblue", border = "white",
+     main = "Histogram of Residuals", xlab = "Residuals")
+
+par(mfrow = c(1, 1))
+```
+
+---
+
+## 5. Interpretation
+
+### What we learned:
+
+1. **Convergence**: The trace plots show good mixing with no trends
+2. **Parameter recovery**: Posterior means are close to true values
+3. **Uncertainty quantification**: 95% credible intervals capture the true parameters
+4. **Prediction**: Posterior predictive checks show the model captures the data well
+5. **Residuals**: Residuals appear random with no systematic patterns
