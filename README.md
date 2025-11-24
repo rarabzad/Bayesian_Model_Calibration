@@ -493,16 +493,21 @@ samples_mcmc <- as.mcmc(samples)
 
 ```r
 # Trace plots
-par(mfrow = c(3, 1))
-plot(samples_mcmc[, "beta0"], main = "Trace plot: beta0", ylab = "beta0")
+par(mfrow = c(3, 2))
+densplot(samples_mcmc[, "beta0"], main = "Density plot: beta0", ylab = "beta0")
+abline(v = beta0_true, col = "red", lwd = 2, lty = 2)
+traceplot(samples_mcmc[, "beta0"], main = "Trace plot: beta0", ylab = "beta0")
 abline(h = beta0_true, col = "red", lwd = 2, lty = 2)
 
-plot(samples_mcmc[, "beta1"], main = "Trace plot: beta1", ylab = "beta1")
+densplot(samples_mcmc[, "beta1"], main = "Density plot: beta1", ylab = "beta1")
+abline(v = beta1_true, col = "red", lwd = 2, lty = 2)
+traceplot(samples_mcmc[, "beta1"], main = "Trace plot: beta1", ylab = "beta1")
 abline(h = beta1_true, col = "red", lwd = 2, lty = 2)
 
-plot(samples_mcmc[, "sigma"], main = "Trace plot: sigma", ylab = "sigma")
+densplot(samples_mcmc[, "sigma"], main = "Density plot: sigma", ylab = "beta1")
+abline(v = sigma_true, col = "red", lwd = 2, lty = 2)
+traceplot(samples_mcmc[, "sigma"], main = "Trace plot: sigma", ylab = "beta1")
 abline(h = sigma_true, col = "red", lwd = 2, lty = 2)
-par(mfrow = c(1, 1))
 
 # Acceptance rate
 cat("Acceptance rate:", mcmc_result$acceptance.rate, "\n")
@@ -515,7 +520,6 @@ par(mfrow = c(3, 1))
 autocorr.plot(samples_mcmc[, "beta0"], main = "Autocorrelation: beta0")
 autocorr.plot(samples_mcmc[, "beta1"], main = "Autocorrelation: beta1")
 autocorr.plot(samples_mcmc[, "sigma"], main = "Autocorrelation: sigma")
-par(mfrow = c(1, 1))
 ```
 
 ### Step 6: Summarize posterior distributions
@@ -536,42 +540,15 @@ cat("\nTrue values:\n")
 print(c(beta0 = beta0_true, beta1 = beta1_true, sigma = sigma_true))
 ```
 
-### Step 7: Posterior density plots
+### Step 7: Joint posterior plots
 
 ```r
-par(mfrow = c(2, 2))
-
-# Beta0
-hist(samples[, "beta0"], breaks = 50, freq = FALSE, 
-     col = "lightblue", border = "white",
-     main = "Posterior: beta0", xlab = "beta0")
-abline(v = beta0_true, col = "red", lwd = 2, lty = 2)
-abline(v = posterior_means["beta0"], col = "blue", lwd = 2)
-legend("topright", legend = c("True", "Posterior mean"), 
-       col = c("red", "blue"), lty = c(2, 1), lwd = 2)
-
-# Beta1
-hist(samples[, "beta1"], breaks = 50, freq = FALSE, 
-     col = "lightblue", border = "white",
-     main = "Posterior: beta1", xlab = "beta1")
-abline(v = beta1_true, col = "red", lwd = 2, lty = 2)
-abline(v = posterior_means["beta1"], col = "blue", lwd = 2)
-legend("topright", legend = c("True", "Posterior mean"), 
-       col = c("red", "blue"), lty = c(2, 1), lwd = 2)
-
-# Sigma
-hist(samples[, "sigma"], breaks = 50, freq = FALSE, 
-     col = "lightblue", border = "white",
-     main = "Posterior: sigma", xlab = "sigma")
-abline(v = sigma_true, col = "red", lwd = 2, lty = 2)
-abline(v = posterior_means["sigma"], col = "blue", lwd = 2)
-legend("topright", legend = c("True", "Posterior mean"), 
-       col = c("red", "blue"), lty = c(2, 1), lwd = 2)
+par(mfrow = c(3, 1))
 
 # Joint posterior (beta0 vs beta1)
 plot(samples[, "beta0"], samples[, "beta1"], 
-     pch = ".", col = rgb(0, 0, 1, 0.1),
-     xlab = "beta0", ylab = "beta1",
+     pch = 19, col = rgb(0, 0, 1, 0.1),
+     xlab = "beta0", ylab = "beta1", cex=0.2,
      main = "Joint Posterior: beta0 vs beta1")
 points(beta0_true, beta1_true, col = "red", pch = 19, cex = 2)
 points(posterior_means["beta0"], posterior_means["beta1"], 
@@ -579,7 +556,27 @@ points(posterior_means["beta0"], posterior_means["beta1"],
 legend("topright", legend = c("True", "Posterior mean"), 
        col = c("red", "blue"), pch = 19)
 
-par(mfrow = c(1, 1))
+# Joint posterior (beta0 vs sigma)
+plot(samples[, "beta0"], samples[, "sigma"], 
+     pch = 19, col = rgb(0, 0, 1, 0.1),
+     xlab = "beta0", ylab = "sigma", cex=0.2,
+     main = "Joint Posterior: beta0 vs sigma")
+points(beta0_true, sigma_true, col = "red", pch = 19, cex = 2)
+points(posterior_means["beta0"], posterior_means["sigma"], 
+       col = "blue", pch = 19, cex = 2)
+legend("topright", legend = c("True", "Posterior mean"), 
+       col = c("red", "blue"), pch = 19)
+
+# Joint posterior (beta1 vs sigma)
+plot(samples[, "beta1"], samples[, "sigma"], 
+     pch = 19, col = rgb(0, 0, 1, 0.1),
+     xlab = "beta1", ylab = "sigma", cex=0.2,
+     main = "Joint Posterior: beta1 vs sigma")
+points(beta1_true, sigma_true, col = "red", pch = 19, cex = 2)
+points(posterior_means["beta1"], posterior_means["sigma"], 
+       col = "blue", pch = 19, cex = 2)
+legend("topright", legend = c("True", "Posterior mean"), 
+       col = c("red", "blue"), pch = 19)
 ```
 
 ### Step 8: Posterior predictive checks
@@ -595,7 +592,8 @@ x_pred <- seq(0, 10, length.out = 100)
 # Storage for predictions
 y_pred_samples <- matrix(NA, nrow = n_pred, ncol = length(x_pred))
 
-for (i in 1:n_pred) {
+for (i in 1:n_pred)
+{
   idx <- pred_indices[i]
   beta0_s <- samples[idx, "beta0"]
   beta1_s <- samples[idx, "beta1"]
@@ -607,8 +605,9 @@ for (i in 1:n_pred) {
 }
 
 # Plot posterior predictive distribution
-plot(x, y, pch = 19, col = "steelblue",
-     xlab = "x", ylab = "y",
+dev.off()
+plot(x, y,
+     xlab = "x", ylab = "y",ylim=range(y_pred_samples),xlim=range(x_pred),pch=NA,
      main = "Posterior Predictive Check")
 
 # Add posterior predictive samples (light lines)
@@ -626,12 +625,19 @@ abline(a = beta0_true, b = beta1_true, col = "red", lwd = 2, lty = 2)
 # Add data points again (on top)
 points(x, y, pch = 19, col = "steelblue")
 
+# Add analytical lines
+model <- lm(y ~ x)
+pred <- predict(model, newdata = data.frame(x = x_pred), interval = "prediction", level = 0.95)
+lines(x_pred, pred[, "lwr"], col = "green", lty = 3, lwd=2)
+lines(x_pred, pred[, "upr"], col = "green", lty = 3, lwd=2)
+
+
 legend("topleft", 
-       legend = c("Data", "True relationship", "Posterior mean", "Posterior samples"),
-       col = c("steelblue", "red", "blue", rgb(0, 0, 0, 0.3)),
-       pch = c(19, NA, NA, NA),
-       lty = c(NA, 2, 1, 1),
-       lwd = c(NA, 2, 2, 1))
+       legend = c("Data", "True relationship", "Posterior mean", "Posterior samples","Analytical"),
+       col = c("steelblue", "red", "blue", rgb(0, 0, 0, 0.3),"green"),
+       pch = c(19, NA, NA, NA, NA),
+       lty = c(NA, 2, 1, 1, 3),
+       lwd = c(NA, 2, 2, 1, 2))
 ```
 
 ### Step 9: Residual analysis
@@ -675,6 +681,6 @@ par(mfrow = c(1, 1))
 
 1. **Convergence**: The trace plots show good mixing with no trends
 2. **Parameter recovery**: Posterior means are close to true values
-3. **Uncertainty quantification**: 95% credible intervals capture the true parameters
+3. **Uncertainty quantification**: 95% credible intervals capture the true parameters and are close to the analytically derived lines
 4. **Prediction**: Posterior predictive checks show the model captures the data well
 5. **Residuals**: Residuals appear random with no systematic patterns
