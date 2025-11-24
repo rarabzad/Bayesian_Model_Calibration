@@ -412,6 +412,9 @@ legend("topleft", legend = "True relationship",
 ```
 
 ### Step 3: Define the log-posterior function
+![Bayesian Workflow](https://miro.medium.com/v2/resize:fit:1400/format:webp/1*Erdj9OOCQ9aFZoroy1hCbw.png)
+
+*Figure: Bayesian inference workflow - combining prior beliefs with data to obtain the posterior distribution.*
 
 ```r
 # Log-prior function
