@@ -1176,7 +1176,7 @@ par(mfrow = c(1, 1))
 
 ```r
 # Generate posterior predictive samples
-n_pred <- 200
+n_pred <- 5000
 pred_indices <- sample(1:nrow(samples), n_pred)
 
 # Storage for predictions
@@ -1212,7 +1212,7 @@ plot(x, y, pch = 19, col = "steelblue",
 
 # Add posterior predictive samples
 for (i in 1:n_pred) {
-  lines(x, y_pred_samples[i, ], col = rgb(0, 0, 0, 0.02))
+  lines(x, y_pred_samples[i, ], col = rgb(0, 0, 0, 0.02),lwd=0.5)
 }
 
 # Add posterior mean prediction
@@ -1225,12 +1225,16 @@ lines(x, mu, col = "red", lwd = 2, lty = 2)
 # Add data again
 points(x, y, pch = 19, col = "steelblue")
 
-legend("topleft",
-       legend = c("Data", "True", "Post. mean", "Post. samples"),
-       col = c("steelblue", "red", "blue", rgb(0, 0, 0, 0.3)),
-       pch = c(19, NA, NA, NA),
-       lty = c(NA, 2, 1, 1),
-       lwd = c(NA, 2, 2, 1))
+model <- lm(y ~ x)
+pred <- predict(model, newdata = data.frame(x = x_pred), interval = "prediction", level = 0.95)
+lines(x_pred, pred[, "lwr"], col = "green", lty = 3, lwd=2)
+lines(x_pred, pred[, "upr"], col = "green", lty = 3, lwd=2)
+legend("topleft", 
+       legend = c("Data", "True relationship", "Posterior mean", "Posterior samples","Analytical"),
+       col = c("steelblue", "red", "blue", rgb(0, 0, 0, 0.3),"green"),
+       pch = c(19, NA, NA, NA, NA),
+       lty = c(NA, 2, 1, 1, 3),
+       lwd = c(NA, 2, 2, 1, 2))
 ```
 
 ### Step 9: Advanced diagnostics
