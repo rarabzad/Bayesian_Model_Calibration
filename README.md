@@ -712,6 +712,11 @@ where:
 - $\varepsilon_t = \phi \varepsilon_{t-1} + \eta_t$, where $\eta_t \sim \mathcal{N}(0, \sigma_t^2)$ (autocorrelation)
 - Box-Cox transformation: $y^{(\lambda)} = \frac{y^\lambda - 1}{\lambda}$ for $\lambda \neq 0$
 
+![Bayesian Workflow]([https://svmiller.com/images/prior-posterior-likelihood.png](https://agupubs.onlinelibrary.wiley.com/cms/asset/4c626081-392a-4624-9a88-73f5142e17af/wrcr12578-fig-0003.png))
+
+*Figure: residuals diagnostics plot.*
+
+
 **Parameters to estimate:**
 - $\beta_0$: intercept
 - $\beta_1$: slope
