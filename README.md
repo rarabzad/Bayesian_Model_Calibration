@@ -1,15 +1,3 @@
-## Goals
-
-* Give a **clear intuition** for Bayesian thinking.
-* Teach a **practical calibration workflow** (prior → likelihood → posterior → checks).
-* Provide short exercises and a checklist to run real calibrations.
-
-## Audience
-
-Practitioners who want to calibrate models (hydrology, ecology, engineering, etc.) with uncertainty — no deep Bayesian background required.
-
----
-
 # 1. Quick Bayesian intuition
 
 * **Bayes = update beliefs with data.**
