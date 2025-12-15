@@ -3,7 +3,7 @@
 * **Bayes = update beliefs with data.**
 * Start with what you *think* (prior), see data (likelihood), get what you *believe now* (posterior).
 
-### Bayes' rule (compact)
+### Bayes' rule
 
 $$p(\theta\mid y) = \frac{p(y\mid \theta)\,p(\theta)}{p(y)}$$
 
