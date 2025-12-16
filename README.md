@@ -14,7 +14,7 @@ $$p(\theta\mid y) = \frac{p(y\mid \theta)\,p(\theta)}{p(y)}$$
 
 ---
 
-# 2. Key terms — one-line cheatsheet
+# 2. Key terms
 
 * **Prior**: beliefs about parameters before data.
 * **Likelihood**: model of the data given parameters.
@@ -26,7 +26,7 @@ $$p(\theta\mid y) = \frac{p(y\mid \theta)\,p(\theta)}{p(y)}$$
 
 ---
 
-# 3. Bayesian calibration — the practical workflow
+# 3. Bayesian calibration
 
 1. **Define model (process + noise).** What generates data? Which parameters matter?
 2. **Choose priors.** Document choices and reasons.
@@ -41,14 +41,14 @@ $$p(\theta\mid y) = \frac{p(y\mid \theta)\,p(\theta)}{p(y)}$$
 
 # 4. Intuitive guide to each component
 
-## 4.1 Priors — minimal words, maximum clarity
+## 4.1 Priors
 
 * **Purpose**: regularize estimation, incorporate prior knowledge, avoid nonsense.
 * **Types**: informative (strong knowledge), weakly informative (mild constraints), non-informative (flat).
 * **Rule of thumb**: prefer weakly informative priors that rule out impossible values but don't force a result.
 * **Document** your prior choices and test sensitivity by changing them.
 
-## 4.2 Likelihood — what matters
+## 4.2 Likelihood
 
 * Choose a likelihood that reflects measurement error and process noise.
 * Consider transformations (log for multiplicative errors).
@@ -57,7 +57,7 @@ $$p(\theta\mid y) = \frac{p(y\mid \theta)\,p(\theta)}{p(y)}$$
 ## 4.3 Posterior — what you inspect
 
 * Look at marginal distributions and joint correlations.
-* Check credible intervals for practical significance (not just statistical).
+* Check credible intervals for practical significance.
 * Use posterior predictive distributions to inspect model fit in data space.
 
 ---
@@ -81,14 +81,16 @@ $$p(\theta\mid y) = \frac{p(y\mid \theta)\,p(\theta)}{p(y)}$$
 
 ---
 
-# 7. Short, practical examples (copy-paste friendly)
+# 7. Short, practical examples
 
-### Minimal Stan/brms-style pseudocode (concept)
+### Minimal Stan/brms-style
 
 ```r
 library(brms)
 
 # Define model
+x<-cars$speed
+y<-cars$dist
 model <- brm(
   y ~ 1,                                    # formula
   prior = c(
