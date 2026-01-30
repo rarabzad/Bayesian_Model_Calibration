@@ -122,7 +122,7 @@ points(y, rep(0, length(y)), col = "red")
 
 ---
 
-# 9. Common pitfalls (quick)
+# 9. Common pitfalls
 
 * Overconfident priors that dominate data.
 * Ignoring model misspecification (bad likelihood).
@@ -162,17 +162,17 @@ where $\theta$ represents model parameters (e.g., hydraulic conductivity, reacti
 
 # 11. Error Model — describing uncertainty in data
 
-## 11.1 Why it matters
-
 The **error model** defines how observed data deviate from the model output. This is often where misspecification hides.
+![Descriptive alt text](https://ars.els-cdn.com/content/image/1-s2.0-S0022169424011338-gr2.jpg)
 
-## 11.2 Simple additive error model
+
+## 11.1 Simple additive error model
 
 $$y_i = f(x_i, \theta) + \varepsilon_i$$
 
 where $\varepsilon_i \sim \mathcal{N}(0, \sigma^2)$
 
-## 11.3 Multiplicative error model (log-transformed)
+## 11.2 Multiplicative error model (log-transformed)
 
 $$y_i = f(x_i, \theta) \times (1 + \varepsilon_i), \quad \varepsilon_i \sim \mathcal{N}(0, \sigma^2)$$
 
@@ -182,19 +182,19 @@ $$\log(y_i) = \log(f(x_i, \theta)) + \eta_i, \quad \eta_i \sim \mathcal{N}(0, \s
 
 — useful for skewed or strictly positive data.
 
-## 11.4 Student-t error model (heavy-tailed)
+## 11.3 Student-t error model (heavy-tailed)
 
 $$\varepsilon_i \sim t_\nu(0, \sigma^2)$$
 
 — robust against outliers; $\nu$ controls tail heaviness.
 
-## 11.5 Heteroscedastic error model
+## 11.4 Heteroscedastic error model
 
 $$\varepsilon_i \sim \mathcal{N}(0, (\sigma_0 + \sigma_1 |f(x_i, \theta)|)^2)$$
 
 — allows larger variance for higher predictions.
 
-## 11.6 Autocorrelated errors (time series)
+## 11.5 Autocorrelated errors (time series)
 
 $$\varepsilon_t = \phi \varepsilon_{t-1} + \eta_t, \quad \eta_t \sim \mathcal{N}(0, \sigma^2)$$
 
