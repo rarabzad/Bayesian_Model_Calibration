@@ -1,4 +1,6 @@
-# 1. Quick Bayesian intuition
+# 1. Intro
+
+The purpose of this repository is to provide a walkthrough of the basic concepts of Bayesian inference and demonstrate their application in the calibration of numerical models.
 
 * **Bayes = update beliefs with data.**
 * Start with what you *think* (prior), see data (likelihood), get what you *believe now* (posterior).
@@ -28,7 +30,7 @@ $$p(\theta\mid y) = \frac{p(y\mid \theta)\,p(\theta)}{p(y)}$$
 
 # 3. Bayesian calibration
 
-1. **Define model (process + noise).** What generates data? Which parameters matter?
+1. **Define model (process).** What generates data? Which parameters matter?
 2. **Choose priors.** Document choices and reasons.
 3. **Specify likelihood.** E.g., Normal errors, log-Normal, Poisson — match data type and error structure.
 4. **Fit (compute posterior).** Use sampling (MCMC) or approximation (VI).
@@ -38,8 +40,6 @@ $$p(\theta\mid y) = \frac{p(y\mid \theta)\,p(\theta)}{p(y)}$$
 8. **(Optional) Model comparison & robustness.** LOO, WAIC, sensitivity to priors.
 
 ---
-
-# 4. Intuitive guide to each component
 
 ## 4.1 Priors
 
@@ -62,11 +62,11 @@ $$p(\theta\mid y) = \frac{p(y\mid \theta)\,p(\theta)}{p(y)}$$
 
 ---
 
-# 5. Inference methods (brief)
+# 5. Inference methods
 
 * **MCMC (standard)** — accurate but can be slow. HMC / NUTS are efficient for many parameters.
 * **Variational inference (VI)** — approximates posterior fast; can miss tails. Good for large-scale or initial exploration.
-* **Optimization / MAP** — single best point estimate; loses uncertainty.
+* **Optimization** — single best point estimate; loses uncertainty.
 
 ---
 
@@ -92,11 +92,7 @@ library(brms)
 x<-cars$speed
 y<-cars$dist
 model <- brm(
-  y ~ 1,                                    # formula
-  prior = c(
-    prior(normal(0, 1), class = Intercept), # prior on theta
-    prior(normal(0, 1), class = sigma)      # prior on sigma
-  ),
+  y ~ x,                                    # formula
   data = data.frame(y = y, x = x),
   chains = 4, 
   iter = 2000, 
@@ -115,9 +111,6 @@ ppc <- posterior_predict(model)
 plot(density(ppc), main = "Posterior Predictive")
 points(y, rep(0, length(y)), col = "red")
 ```
-
-> Adapt to your specific model structure and Stan/brms/rstan workflow.
-
 ---
 
 # 8. Reporting & reproducibility — checklist
