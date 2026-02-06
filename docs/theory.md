@@ -18,7 +18,26 @@
   * [2.4 Bayesian Inference in Hydrologic Context](#24-bayesian-inference-in-hydrologic-context)
   * [2.5 Visualization of Bayesian Updating](#25-visualization-of-bayesian-updating)
   * [2.6 Mathematical Properties of Bayesian Inference](#26-mathematical-properties-of-bayesian-inference)
-
+* [3. Components of Bayesian Calibration](#3-components-of-bayesian-calibration)
+  * [3.1 Hydrologic Model Formulation](#31-hydrologic-model-formulation)
+  * [3.2 Prior Distribution](#32-prior-distribution)
+  * [3.3 Likelihood Function](#33-likelihood-function)
+  * [3.4 Homoscedastic and Independent Gaussian Likelihood](#34-homoscedastic-and-independent-gaussian-likelihood)
+    * [3.4.1 Likelihood Function](#341-likelihood-function)
+    * [3.4.2 Interpretation](#342-interpretation)
+  * [3.5 Heteroscedastic and Autocorrelated Gaussian Likelihood](#35-heteroscedastic-and-autocorrelated-gaussian-likelihood)
+    * [3.5.1 Heteroscedastic Variance](#351-heteroscedastic-variance)
+    * [3.5.2 Autocorrelated Residuals (AR(1))](#352-autocorrelated-residuals-ar1)
+    * [3.5.3 Log-Likelihood Function](#353-log-likelihood-function)
+    * [3.5.4 Understanding the Jacobian Adjustment](#354-understanding-the-jacobian-adjustment)
+      * [3.5.4.1 The Change-of-Variables Problem](#3541-the-change-of-variables-problem)
+      * [3.5.4.2 Jacobian for Heteroscedastic Standardization](#3542-jacobian-for-heteroscedastic-standardization)
+      * [3.5.4.3 Why the Jacobian Matters](#3543-why-the-jacobian-matters)
+      * [3.5.4.4 Practical Hydrologic Interpretation](#3544-practical-hydrologic-interpretation)
+      * [3.5.4.5 Implementation Note](#3545-implementation-note)
+    * [3.5.5 Summary of Advanced Likelihood Components](#355-summary-of-advanced-likelihood-components)
+  * [3.6 Posterior Distribution](#36-posterior-distribution)
+  * [3.7 Role of Error Model Selection](#37-role-of-error-model-selection)
 ---
 
 # 1. Introduction
