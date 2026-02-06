@@ -463,12 +463,12 @@ $$
 In log-likelihood form:
 
 $$
-\log p(\boldsymbol{\varepsilon}) = \log p(\boldsymbol{\eta}) + \sum_{t=1}^{T} \log \sigma_{\varepsilon(t)}
+\log p(\boldsymbol{\varepsilon}) = \log p(\boldsymbol{\eta}) + (-\sum_{t=1}^{T} \log \sigma_{\varepsilon(t)})
 $$
 
 **Practical implication**: When we model standardized residuals $\eta_t$ using an AR(1) process with unit innovation variance, the likelihood of the **original residuals** must include the Jacobian term $\sum_{t=1}^{T} \log \sigma_{\varepsilon(t)}$.
 
-Since we typically work with the **negative** log-likelihood (for minimization), this appears as:
+So we have:
 
 $$
 -\sum_{t=1}^{T} \log \sigma_{\varepsilon(t)} = -\sum_{t=1}^{T} \log(a \cdot \hat{Q}_t + b)
