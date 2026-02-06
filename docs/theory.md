@@ -189,11 +189,13 @@ Bayesian calibration in hydrology combines prior knowledge, model structure, and
 This section describes the **essential components** of Bayesian calibration, including:
 
 1. The hydrologic model structure
-2. Prior distributions for parameters
-3. Likelihood functions, including:
+2. **Prior distributions for parameters**
+3. **Likelihood functions**, may include:
    * Homoscedastic and independent Gaussian likelihood
    * Heteroscedastic and autocorrelated Gaussian likelihood with Box-Cox transformation
-4. Interpretation of each component in hydrologic terms
+4. **Posterior distribution**
+5. Interpretation of each component in hydrologic terms
+![Bayesian Workflow](https://svmiller.com/images/prior-posterior-likelihood.png)
 
 ---
 
@@ -299,10 +301,8 @@ Real hydrologic residuals often **violate homoscedasticity and independence assu
 2. **Standardized residuals**
 3. **AR(1) autocorrelation** in standardized residuals
 4. **Jacobian adjustment** for the standardization transformation
-
+![Descriptive alt text](https://ars.els-cdn.com/content/image/1-s2.0-S0022169424011338-gr2.jpg)
 ---
-
-### 3.5.1 Heteroscedastic Variance
 
 ### 3.5.1 Heteroscedastic Variance
 
@@ -333,8 +333,6 @@ This standardization accounts for heteroscedasticity and allows the AR(1) model 
 
 ### 3.5.2 Autocorrelated Residuals (AR(1))
 
-### 3.5.2 Autocorrelated Residuals (AR(1))
-
 Standardized residuals are modeled as an AR(1) process:
 
 $$
@@ -352,8 +350,6 @@ $$
 This formulation captures **memory effects in streamflow** and flow-dependent uncertainty.
 
 ---
-
-### 3.5.3 Log-Likelihood Function
 
 ### 3.5.3 Log-Likelihood Function
 
@@ -385,8 +381,6 @@ $$
 * Third line: Jacobian for heteroscedastic standardization
 
 ---
-
-### 3.5.4 Understanding the Jacobian Adjustment
 
 ### 3.5.4 Understanding the Jacobian Adjustment
 
@@ -530,8 +524,6 @@ where `log_p_eta` is the log-density of the AR(1) process for standardized resid
 **Critical reminder**: This Jacobian must **always** be included when standardizing residuals. Omitting it invalidates the entire Bayesian inference procedure.
 
 ---
-
-### 3.5.5 Summary of Advanced Likelihood Components
 
 ### 3.5.5 Summary of Advanced Likelihood Components
 
