@@ -304,6 +304,8 @@ Real hydrologic residuals often **violate homoscedasticity and independence assu
 
 ### 3.5.1 Heteroscedastic Variance
 
+### 3.5.1 Heteroscedastic Variance
+
 The flow-dependent residual standard deviation is:
 
 $$
@@ -331,6 +333,8 @@ This standardization accounts for heteroscedasticity and allows the AR(1) model 
 
 ### 3.5.2 Autocorrelated Residuals (AR(1))
 
+### 3.5.2 Autocorrelated Residuals (AR(1))
+
 Standardized residuals are modeled as an AR(1) process:
 
 $$
@@ -351,6 +355,8 @@ This formulation captures **memory effects in streamflow** and flow-dependent un
 
 ### 3.5.3 Log-Likelihood Function
 
+### 3.5.3 Log-Likelihood Function
+
 The log-likelihood function for the heteroscedastic AR(1) error model is:
 
 $$
@@ -361,7 +367,7 @@ $$
 \end{align}
 $$
 
-where the last term is the **Jacobian adjustment** for the standardization transformation. The Jacobian adjustment is a critical component of the likelihood function when working with standardized residuals. This section explains **why** the Jacobian is necessary and **how** to derive it correctly for heteroscedastic error models.
+where the last term is the **Jacobian adjustment** for the standardization transformation.
 
 This can be rewritten more explicitly as:
 
@@ -377,6 +383,15 @@ $$
 * First line: Initial condition for AR(1) process
 * Second line: AR(1) contributions for $t = 2, \ldots, T$
 * Third line: Jacobian for heteroscedastic standardization
+
+---
+
+### 3.5.4 Understanding the Jacobian Adjustment
+
+### 3.5.4 Understanding the Jacobian Adjustment
+
+The Jacobian adjustment is a critical component of the likelihood function when working with standardized residuals. This section explains **why** the Jacobian is necessary and **how** to derive it correctly for heteroscedastic error models.
+
 ---
 
 #### 3.5.4.1 The Change-of-Variables Problem
@@ -415,34 +430,40 @@ $$
 
 **The transformation**: We are transforming from raw residuals $\boldsymbol{\varepsilon} = (\varepsilon_1, \ldots, \varepsilon_T)$ to standardized residuals $\boldsymbol{\eta} = (\eta_1, \ldots, \eta_T)$.
 
-**Deriving the Jacobian**: The inverse transformation is:
+**Deriving the Jacobian**: The forward transformation is:
 
 $$
-\varepsilon_t = \sigma_{\varepsilon(t)} \cdot \eta_t
+\eta_t = \frac{\varepsilon_t}{\sigma_{\varepsilon(t)}}
 $$
 
-The derivative of $\varepsilon_t$ with respect to $\eta_t$ is:
+The derivative of $\eta_t$ with respect to $\varepsilon_t$ is:
 
 $$
-\frac{\partial \varepsilon_t}{\partial \eta_t} = \sigma_{\varepsilon(t)}
+\frac{\partial \eta_t}{\partial \varepsilon_t} = \frac{1}{\sigma_{\varepsilon(t)}}
 $$
 
 For the multivariate transformation, the Jacobian matrix is diagonal:
 
 $$
-\frac{\partial \boldsymbol{\varepsilon}}{\partial \boldsymbol{\eta}} = \text{diag}(\sigma_{\varepsilon(1)}, \ldots, \sigma_{\varepsilon(T)})
+\frac{\partial \boldsymbol{\eta}}{\partial \boldsymbol{\varepsilon}} = \text{diag}\left(\frac{1}{\sigma_{\varepsilon(1)}}, \ldots, \frac{1}{\sigma_{\varepsilon(T)}}\right)
 $$
 
 The determinant is:
 
 $$
-\left| \det \left( \frac{\partial \boldsymbol{\varepsilon}}{\partial \boldsymbol{\eta}} \right) \right| = \prod_{t=1}^{T} \sigma_{\varepsilon(t)}
+\left| \det \left( \frac{\partial \boldsymbol{\eta}}{\partial \boldsymbol{\varepsilon}} \right) \right| = \prod_{t=1}^{T} \frac{1}{\sigma_{\varepsilon(t)}}
 $$
 
-**Likelihood with Jacobian**: The joint density of raw residuals is:
+**Likelihood with Jacobian**: The joint density of standardized residuals is related to the density of raw residuals by:
 
 $$
-p(\boldsymbol{\varepsilon}) = p(\boldsymbol{\eta}) \left| \det \left( \frac{\partial \boldsymbol{\varepsilon}}{\partial \boldsymbol{\eta}} \right) \right| = p(\boldsymbol{\eta}) \prod_{t=1}^{T} \sigma_{\varepsilon(t)}
+p(\boldsymbol{\eta}) = p(\boldsymbol{\varepsilon}) \left| \det \left( \frac{\partial \boldsymbol{\eta}}{\partial \boldsymbol{\varepsilon}} \right) \right| = p(\boldsymbol{\varepsilon}) \prod_{t=1}^{T} \frac{1}{\sigma_{\varepsilon(t)}}
+$$
+
+Rearranging to express the density of raw residuals (which is what we actually observe):
+
+$$
+p(\boldsymbol{\varepsilon}) = p(\boldsymbol{\eta}) \prod_{t=1}^{T} \sigma_{\varepsilon(t)}
 $$
 
 In log-likelihood form:
@@ -453,10 +474,10 @@ $$
 
 **Practical implication**: When we model standardized residuals $\eta_t$ using an AR(1) process with unit innovation variance, the likelihood of the **original residuals** must include the Jacobian term $\sum_{t=1}^{T} \log \sigma_{\varepsilon(t)}$.
 
-Since we want the **negative** log-likelihood (for minimization or to subtract from the log-likelihood), this appears as:
+Since we typically work with the **negative** log-likelihood (for minimization), this appears as:
 
 $$
--\sum_{t=1}^{T} \log \sigma_{\varepsilon(t)}
+-\sum_{t=1}^{T} \log \sigma_{\varepsilon(t)} = -\sum_{t=1}^{T} \log(a \cdot \hat{Q}_t + b)
 $$
 
 in the complete log-likelihood expression in Section 3.5.3.
@@ -509,6 +530,8 @@ where `log_p_eta` is the log-density of the AR(1) process for standardized resid
 **Critical reminder**: This Jacobian must **always** be included when standardizing residuals. Omitting it invalidates the entire Bayesian inference procedure.
 
 ---
+
+### 3.5.5 Summary of Advanced Likelihood Components
 
 ### 3.5.5 Summary of Advanced Likelihood Components
 
