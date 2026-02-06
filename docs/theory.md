@@ -162,3 +162,376 @@ Bayesian inference possesses several mathematical properties that make it partic
 These properties make Bayesian calibration particularly suitable for hydrologic systems characterized by strong nonlinear interactions and limited observational data availability.
 
 ---
+
+# 3. Components of Bayesian Calibration
+
+Bayesian calibration in hydrology combines prior knowledge, model structure, and probabilistic error formulations to infer parameter distributions. The likelihood function plays a central role because it formally links hydrologic simulations to observational data. In realistic hydrologic systems, residual errors are rarely simple: they often exhibit flow-dependent variance (heteroscedasticity) and temporal correlation (autocorrelation).
+
+This section describes the **essential components** of Bayesian calibration, including:
+
+1. The hydrologic model structure
+2. Prior distributions for parameters
+3. Likelihood functions, including:
+   * Homoscedastic and independent Gaussian likelihood
+   * Heteroscedastic and autocorrelated Gaussian likelihood with Box-Cox transformation
+4. Interpretation of each component in hydrologic terms
+
+---
+
+## 3.1 Hydrologic Model Formulation
+
+A hydrologic model represents the relationship between system inputs, internal states, and simulated outputs:
+
+$$
+\hat{Q}_t = f(\theta, X_t, S_0)
+$$
+
+where:
+
+* $\hat{Q}_t$ is simulated streamflow at time $t$
+* $\theta$ is the set of model parameters (e.g., soil, snow, groundwater parameters)
+* $X_t$ represents time-varying forcings, such as precipitation and temperature
+* $S_0$ represents initial model states, such as soil moisture or snowpack
+
+Observed flows are denoted as:
+
+$$
+Q_t^{obs}
+$$
+
+Residual errors represent discrepancies between simulated and observed flows:
+
+$$
+\varepsilon_t = Q_t^{obs} - \hat{Q}_t
+$$
+
+Residual errors arise from measurement errors, forcing uncertainty, model structural simplifications, and inherent variability in hydrologic systems.
+
+---
+
+## 3.2 Prior Distribution
+
+The prior distribution describes initial knowledge about model parameters:
+
+$$
+\theta \sim p(\theta)
+$$
+
+In hydrology, priors help constrain parameters within physically reasonable ranges. Examples:
+
+* Soil hydraulic conductivity may be log-normally distributed because it is strictly positive.
+* Groundwater recession coefficients may be beta-distributed because they lie in the interval [0,1].
+* Snowmelt parameters may follow uniform or truncated normal distributions if prior knowledge is limited.
+
+Priors ensure that posterior parameter estimates remain realistic and physically interpretable. When data are highly informative, the posterior will be dominated by the likelihood; otherwise, the prior may have significant influence.
+
+---
+
+## 3.3 Likelihood Function
+
+The likelihood function describes the probability of observing streamflow data given model parameters and assumptions about residual errors:
+
+$$
+p(D \mid \theta)
+$$
+
+Residual error behavior is crucial:
+
+1. Residual variance may change with flow magnitude (**heteroscedasticity**)
+2. Residuals may exhibit temporal correlation (**autocorrelation**)
+
+We present two likelihood formulations, from simple to advanced.
+
+---
+
+## 3.4 Homoscedastic and Independent Gaussian Likelihood
+
+The simplest assumption is that residuals are independent, identically distributed, and have constant variance:
+
+$$
+\varepsilon_t \sim N(0, \sigma^2)
+$$
+
+### 3.4.1 Likelihood Function
+
+$$
+p(D \mid \theta, \sigma) = \prod_{t=1}^{T} \frac{1}{\sqrt{2 \pi \sigma^2}} \exp\left( -\frac{(Q_t^{obs} - \hat{Q}_t)^2}{2 \sigma^2} \right)
+$$
+
+Or equivalently, the log-likelihood:
+
+$$
+\log p(D \mid \theta, \sigma) = -\frac{T}{2} \log(2 \pi \sigma^2) - \frac{1}{2\sigma^2} \sum_{t=1}^{T} (Q_t^{obs} - \hat{Q}_t)^2
+$$
+
+### 3.4.2 Interpretation
+
+* All residuals are treated equally across flow magnitudes.
+* Low-flow errors may dominate calibration because numerical values are smaller.
+* This assumption often underestimates high-flow uncertainty and ignores temporal dependence.
+
+---
+
+## 3.5 Heteroscedastic and Autocorrelated Gaussian Likelihood
+
+Real hydrologic residuals often **violate homoscedasticity and independence assumptions**. Observed errors are flow-dependent and temporally correlated. To address this, we define:
+
+1. **Flow-dependent (heteroscedastic) residual variance**
+2. **Standardized residuals**
+3. **AR(1) autocorrelation** in standardized residuals
+4. **Jacobian adjustment** for the standardization transformation
+
+---
+
+### 3.5.1 Heteroscedastic Variance
+
+The flow-dependent residual standard deviation is:
+
+$$
+\sigma_{\varepsilon(t)} = a \cdot \hat{Q}_t + b
+$$
+
+* $a$ scales error with flow magnitude
+* $b$ is the baseline variance (intercept)
+
+Raw residuals are:
+
+$$
+\varepsilon_t = Q_t^{obs} - \hat{Q}_t
+$$
+
+Standardized residuals are:
+
+$$
+\eta_t = \frac{\varepsilon_t}{\sigma_{\varepsilon(t)}} = \frac{Q_t^{obs} - \hat{Q}_t}{\sigma_{\varepsilon(t)}}
+$$
+
+This standardization accounts for heteroscedasticity and allows the AR(1) model to assume constant innovation variance.
+
+---
+
+### 3.5.2 Autocorrelated Residuals (AR(1))
+
+Standardized residuals are modeled as an AR(1) process:
+
+$$
+\eta_1 \sim N\left(0, \frac{1}{1 - \phi^2}\right)
+$$
+
+$$
+\eta_t \mid \eta_{t-1} \sim N(\phi \, \eta_{t-1}, 1), \quad t = 2, \dots, T
+$$
+
+* $\phi$ is the autocorrelation coefficient
+* Innovation variance is 1 due to standardization
+* The variance of $\eta_1$ is $1/(1-\phi^2)$ for stationarity
+
+This formulation captures **memory effects in streamflow** and flow-dependent uncertainty.
+
+---
+
+### 3.5.3 Log-Likelihood Function
+
+The log-likelihood function for the heteroscedastic AR(1) error model is:
+
+$$
+\begin{align}
+\log p(D \mid \theta, a, b, \phi) = &-\frac{1}{2} \log \left( \frac{2\pi}{1 - \phi^2} \right) - \frac{\eta_1^2 (1 - \phi^2)}{2} \\
+&- \frac{1}{2} \sum_{t=2}^{T} \left[ \log(2\pi) + (\eta_t - \phi \, \eta_{t-1})^2 \right] \\
+&+ \sum_{t=1}^{T} \log \left( \frac{1}{\sigma_{\varepsilon(t)}} \right)
+\end{align}
+$$
+
+where the last term is the **Jacobian adjustment** for the standardization transformation. The Jacobian adjustment is a critical component of the likelihood function when working with standardized residuals. This section explains **why** the Jacobian is necessary and **how** to derive it correctly for heteroscedastic error models.
+
+This can be rewritten more explicitly as:
+
+$$
+\begin{align}
+\log p(D \mid \theta, a, b, \phi) = &-\frac{1}{2} \log \left( \frac{2\pi}{1 - \phi^2} \right) - \frac{\eta_1^2 (1 - \phi^2)}{2} \\
+&- \frac{T-1}{2} \log(2\pi) - \frac{1}{2} \sum_{t=2}^{T} (\eta_t - \phi \, \eta_{t-1})^2 \\
+&- \sum_{t=1}^{T} \log(\sigma_{\varepsilon(t)})
+\end{align}
+$$
+
+**Components**:
+* First line: Initial condition for AR(1) process
+* Second line: AR(1) contributions for $t = 2, \ldots, T$
+* Third line: Jacobian for heteroscedastic standardization
+---
+
+#### 3.5.4.1 The Change-of-Variables Problem
+
+When we transform random variables, probability densities must be adjusted to maintain mathematical validity. Consider a random variable $Y$ with density $p_Y(y)$ and its transformation $Z = g(Y)$ with density $p_Z(z)$. These densities are related by:
+
+$$
+p_Y(y) = p_Z(g(y)) \left| \frac{dg(y)}{dy} \right|
+$$
+
+The term $\left| \frac{dg(y)}{dy} \right|$ is the **Jacobian** of the transformation. It accounts for how the transformation stretches or compresses probability mass across different regions of the variable space.
+
+**Key principle**: When we write a likelihood in terms of transformed variables, we must include the Jacobian to correctly represent the probability of observing the **original data**.
+
+---
+
+#### 3.5.4.2 Jacobian for Heteroscedastic Standardization
+
+The heteroscedastic error model defines raw residuals:
+
+$$
+\varepsilon_t = Q_t^{obs} - \hat{Q}_t
+$$
+
+with flow-dependent standard deviation:
+
+$$
+\sigma_{\varepsilon(t)} = a \cdot \hat{Q}_t + b
+$$
+
+We then standardize residuals to obtain unit-variance innovations:
+
+$$
+\eta_t = \frac{\varepsilon_t}{\sigma_{\varepsilon(t)}}
+$$
+
+**The transformation**: We are transforming from raw residuals $\boldsymbol{\varepsilon} = (\varepsilon_1, \ldots, \varepsilon_T)$ to standardized residuals $\boldsymbol{\eta} = (\eta_1, \ldots, \eta_T)$.
+
+**Deriving the Jacobian**: The inverse transformation is:
+
+$$
+\varepsilon_t = \sigma_{\varepsilon(t)} \cdot \eta_t
+$$
+
+The derivative of $\varepsilon_t$ with respect to $\eta_t$ is:
+
+$$
+\frac{\partial \varepsilon_t}{\partial \eta_t} = \sigma_{\varepsilon(t)}
+$$
+
+For the multivariate transformation, the Jacobian matrix is diagonal:
+
+$$
+\frac{\partial \boldsymbol{\varepsilon}}{\partial \boldsymbol{\eta}} = \text{diag}(\sigma_{\varepsilon(1)}, \ldots, \sigma_{\varepsilon(T)})
+$$
+
+The determinant is:
+
+$$
+\left| \det \left( \frac{\partial \boldsymbol{\varepsilon}}{\partial \boldsymbol{\eta}} \right) \right| = \prod_{t=1}^{T} \sigma_{\varepsilon(t)}
+$$
+
+**Likelihood with Jacobian**: The joint density of raw residuals is:
+
+$$
+p(\boldsymbol{\varepsilon}) = p(\boldsymbol{\eta}) \left| \det \left( \frac{\partial \boldsymbol{\varepsilon}}{\partial \boldsymbol{\eta}} \right) \right| = p(\boldsymbol{\eta}) \prod_{t=1}^{T} \sigma_{\varepsilon(t)}
+$$
+
+In log-likelihood form:
+
+$$
+\log p(\boldsymbol{\varepsilon}) = \log p(\boldsymbol{\eta}) + \sum_{t=1}^{T} \log \sigma_{\varepsilon(t)}
+$$
+
+**Practical implication**: When we model standardized residuals $\eta_t$ using an AR(1) process with unit innovation variance, the likelihood of the **original residuals** must include the Jacobian term $\sum_{t=1}^{T} \log \sigma_{\varepsilon(t)}$.
+
+Since we want the **negative** log-likelihood (for minimization or to subtract from the log-likelihood), this appears as:
+
+$$
+-\sum_{t=1}^{T} \log \sigma_{\varepsilon(t)}
+$$
+
+in the complete log-likelihood expression in Section 3.5.3.
+
+---
+
+#### 3.5.4.3 Why the Jacobian Matters
+
+Without the Jacobian adjustment:
+
+1. **Parameter estimates become biased** because the likelihood does not correctly represent the data-generating process
+2. **Variance parameters $a$ and $b$ are incorrectly estimated**, leading to wrong uncertainty quantification
+3. **Model comparison becomes invalid** because likelihoods are evaluated on different scales
+4. **Predictive uncertainty is misrepresented**, with credible intervals not achieving nominal coverage
+5. **The optimization problem is mathematically incorrect**
+
+---
+
+#### 3.5.4.4 Practical Hydrologic Interpretation
+
+In hydrologic calibration:
+
+* **Heteroscedastic standardization** ensures that low-flow and high-flow residuals contribute appropriately to the likelihood.
+
+* The Jacobian term $-\sum_{t=1}^{T} \log \sigma_{\varepsilon(t)}$ **penalizes parameter values** that predict unrealistically large error variance. This is a form of automatic regularization.
+
+* **Physical interpretation**: When $\sigma_{\varepsilon(t)}$ is large (high uncertainty), the Jacobian contribution becomes more negative, reducing the likelihood. This encourages the calibration to find parameters that minimize prediction uncertainty.
+
+* **Combined effect**: The standardization removes heteroscedasticity from the AR(1) model (making it have unit innovation variance), while the Jacobian ensures we're still making valid probabilistic statements about the **original streamflow observations**.
+
+---
+
+#### 3.5.4.5 Implementation Note
+
+In practice, the Jacobian term appears naturally in the log-likelihood. Using the relationship $\sigma_{\varepsilon(t)} = a \cdot \hat{Q}_t + b$:
+
+```r
+# Compute flow-dependent standard deviations
+sigma_eps <- a * Q_sim + b
+
+# Jacobian contribution to log-likelihood
+jacobian_term <- -sum(log(sigma_eps))
+
+# Or equivalently, when computing the full likelihood:
+log_likelihood <- log_p_eta + jacobian_term
+```
+
+where `log_p_eta` is the log-density of the AR(1) process for standardized residuals.
+
+**Critical reminder**: This Jacobian must **always** be included when standardizing residuals. Omitting it invalidates the entire Bayesian inference procedure.
+
+---
+
+### 3.5.5 Summary of Advanced Likelihood Components
+
+The heteroscedastic AR(1) likelihood addresses key limitations of simpler error models:
+
+* **Heteroscedastic variance** ($\sigma_{\varepsilon(t)} = a \cdot \hat{Q}_t + b$) ensures proper weighting of residuals across low and high flows.
+* **Standardization** ($\eta_t = \varepsilon_t / \sigma_{\varepsilon(t)}$) transforms residuals to unit variance, enabling standard AR(1) modeling.
+* **AR(1) autocorrelation** captures temporal persistence due to storage and routing processes in hydrologic systems.
+* **Jacobian adjustment** ($-\sum \log \sigma_{\varepsilon(t)}$) maintains statistical validity when working with standardized residuals.
+
+Calibration using this likelihood leads to **realistic posterior distributions** of model parameters, proper uncertainty quantification across flow regimes, and more reliable predictive uncertainty.
+
+---
+
+## 3.6 Posterior Distribution
+
+Combining prior distributions with the likelihood yields the posterior:
+
+$$
+p(\theta \mid D) \propto p(D \mid \theta) \, p(\theta)
+$$
+
+Including the heteroscedastic AR(1) error model introduces additional parameters for the residual structure:
+
+$$
+p(\theta, a, b, \phi \mid D)
+$$
+
+where:
+* $\theta$ represents the hydrologic model parameters
+* $a, b$ are the heteroscedastic variance parameters
+* $\phi$ is the AR(1) autocorrelation coefficient
+
+The posterior distribution describes uncertainty in both **hydrologic model parameters** and **residual error model parameters**, enabling fully probabilistic predictions that account for both parameter uncertainty and realistic error structure.
+
+---
+
+## 3.7 Role of Error Model Selection
+
+* The choice of likelihood directly affects calibration results.
+* Simple Gaussian likelihoods may **underestimate uncertainty** in high flows and ignore temporal dependence.
+* Complex likelihoods improve realism but increase computational cost and parameter identifiability challenges.
+* Diagnostics such as residual analysis, autocorrelation plots, and posterior predictive checks are essential.
+
+---
