@@ -3086,5 +3086,3 @@ This linear regression example serves as a conceptual stepping stone toward comp
 The methodological framework remains constant—only model complexity increases. With solid understanding of Bayesian linear regression, you are well-prepared to tackle sophisticated hydrologic calibration challenges.
 
 ---
-
----
