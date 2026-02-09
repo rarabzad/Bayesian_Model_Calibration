@@ -1,7 +1,5 @@
 # Bayesian Calibration for Hydrologists
 
-## Theory, Components, and Practical Interpretation
-
 ---
 
 ## Table of Contents
@@ -52,44 +50,68 @@
   * [4.8 Posterior Predictive Checks](#48-posterior-predictive-checks)
   * [4.9 Residual Analysis](#49-residual-analysis)
   * [4.10 Summary and Learning Outcomes](#410-summary-and-learning-outcomes)
-* [5. Bayesian calibration](#5-bayesian-calibration)  
-  * [5.1 Model Parameters and Bounds](#51-model-parameters-and-bounds)  
-    * [5.1.1 Parameter list and interpretation](#511-parameter-list-and-interpretation)  
-    * [5.1.2 Recommended example bounds](#512-recommended-example-bounds)  
-    * [5.1.3 Scientific rationale for bounds](#513-scientific-rationale-for-bounds)  
-    * [5.1.4 Practical guidance](#514-practical-guidance)  
-  * [5.2 Log‑Prior Function](#52-log‑prior-function)  
-    * [5.2.1 Uniform prior (default)](#521-uniform-prior-default)  
-    * [5.2.2 R implementation](#522-r-implementation)  
-    * [5.2.3 Alternative priors and when to use them](#523-alternative-priors-and-when-to-use-them)  
-    * [5.2.4 Prior predictive checks](#524-prior-predictive-checks)  
-  * [5.3 Likelihood Function](#53-likelihood-function)  
-    * [5.3.1 Default: Homoscedastic Gaussian](#531-default-homoscedastic-gaussian)  
-    * [5.3.2 R implementation (homoscedastic)](#532-r-implementation-homoscedastic)  
-    * [5.3.3 Likelihood alternatives](#533-likelihood-alternatives)  
-    * [5.3.4 R examples (heteroscedastic and AR(1))](#534-r-examples-heteroscedastic-and-ar1)  
-    * [5.3.5 Likelihood selection checklist](#535-likelihood-selection-checklist)  
-  * [5.4 Log‑Posterior Function](#54-log‑posterior-function)  
-    * [5.4.1 Definition and R wrapper](#541-definition-and-r-wrapper)  
-    * [5.4.2 Scientific considerations](#542-scientific-considerations)  
-  * [5.5 MCMC Sampling](#55-mcmc-sampling)  
-    * [5.5.1 Sampler selection](#551-sampler-selection)  
-    * [5.5.2 Example using adaptMCMC](#552-example-using-adaptmcmc)  
-    * [5.5.3 MCMC best practices](#553-mcmc-best-practices)  
-    * [5.5.4 Computational tips](#554-computational-tips)  
-  * [5.6 Posterior Predictive Checks (PPCs)](#56-posterior-predictive-checks-ppcs)  
-    * [5.6.1 Procedure](#561-procedure)  
-    * [5.6.2 R code (ensemble PPC)](#562-r-code-ensemble-ppc)  
-    * [5.6.3 PPC diagnostics and interpretation](#563-ppc-diagnostics-and-interpretation)  
-    * [5.6.4 Predictive metrics (NSE, KGE)](#564-predictive-metrics-nse-kge)  
-  * [5.7 Residual Diagnostics](#57-residual-diagnostics)  
-    * [5.7.0 Residual definition and computation](#570-residual-definition-and-computation)  
-    * [5.7.1 Residual vs Fitted](#571-residual-vs-fitted)  
-    * [5.7.2 Residual vs Time and Autocorrelation](#572-residual-vs-time-and-autocorrelation)  
-    * [5.7.3 QQ Plot and Histogram](#573-qq-plot-and-histogram)  
-    * [5.7.4 Quantitative diagnostics to report](#574-quantitative-diagnostics-to-report)  
-    * [5.7.5 Actionable responses to diagnostics](#575-actionable-responses-to-diagnostics)  
----
+* [5. Bayesian Calibration of GR4J with Homoscedastic Gaussian Errors](#5-bayesian-calibration-of-gr4j-with-homoscedastic-gaussian-errors)
+  * [Overview of the GR4J Model](#overview-of-the-gr4j-model)
+  * [Why Bayesian Calibration?](#why-bayesian-calibration)
+  * [5.1 Model Parameters and Bounds](#51-model-parameters-and-bounds)
+    * [Parameter list and interpretation](#parameter-list-and-interpretation)
+    * [Detailed Parameter Interpretation](#detailed-parameter-interpretation)
+      * [X1: Production Store Capacity (mm)](#x1-production-store-capacity-mm)
+      * [X2: Groundwater Exchange Coefficient (dimensionless)](#x2-groundwater-exchange-coefficient-dimensionless)
+      * [X3: Routing Store Capacity (mm)](#x3-routing-store-capacity-mm)
+      * [X4: Unit Hydrograph Time Base (days)](#x4-unit-hydrograph-time-base-days)
+      * [TT: Temperature Threshold (°C)](#tt-temperature-threshold-c)
+      * [DDF: Degree-Day Factor (mm °C⁻¹ day⁻¹)](#ddf-degree-day-factor-mm-c1-day1)
+      * [σ: Residual Standard Deviation (m³/s)](#σ-residual-standard-deviation-ms)
+    * [Recommended example bounds (adjust to local catchment)](#recommended-example-bounds-adjust-to-local-catchment)
+    * [Scientific rationale for bounds](#scientific-rationale-for-bounds)
+    * [Parameter Transformation Strategies](#parameter-transformation-strategies)
+  * [5.2 Log‑Prior Function](#52-logprior-function)
+    * [Uniform prior (default)](#uniform-prior-default)
+    * [Alternative priors and when to use them](#alternative-priors-and-when-to-use-them)
+    * [Prior predictive checks](#prior-predictive-checks)
+  * [5.3 Likelihood Function](#53-likelihood-function)
+    * [Default: Homoscedastic Gaussian](#default-homoscedastic-gaussian)
+    * [Likelihood alternatives](#likelihood-alternatives)
+    * [Likelihood selection checklist](#likelihood-selection-checklist)
+  * [5.4 Log‑Posterior Function](#54-logposterior-function)
+    * [Scientific considerations](#scientific-considerations)
+  * [5.5 MCMC Sampling](#55-mcmc-sampling)
+    * [Example using adaptMCMC](#example-using-adaptmcmc)
+    * [MCMC best practices](#mcmc-best-practices)
+    * [Computational tips](#computational-tips)
+  * [5.6 Posterior Predictive Checks (PPCs)](#56-posterior-predictive-checks-ppcs)
+    * [Theoretical Foundation](#theoretical-foundation)
+    * [Procedure](#procedure)
+    * [R code (ensemble PPC)](#r-code-ensemble-ppc)
+    * [Visual PPC Diagnostics](#visual-ppc-diagnostics)
+      * [Time Series Plot with Uncertainty Bands](#time-series-plot-with-uncertainty-bands)
+      * [Spaghetti Plot: Overlay of Multiple Realizations](#spaghetti-plot-overlay-of-multiple-realizations)
+      * [Flow Duration Curve (FDC) Comparison](#flow-duration-curve-fdc-comparison)
+    * [PPC diagnostics and interpretation](#ppc-diagnostics-and-interpretation)
+      * [Coverage Analysis](#coverage-analysis)
+      * [Conditional Coverage: Coverage by Flow Regime](#conditional-coverage-coverage-by-flow-regime)
+      * [Tail Behavior: Extreme Event Capture](#tail-behavior-extreme-event-capture)
+    * [Predictive Performance Metrics](#predictive-performance-metrics)
+    * [Seasonal and Regime-Specific PPCs](#seasonal-and-regime-specific-ppcs)
+    * [Advanced PPC: Test Statistics](#advanced-ppc-test-statistics)
+    * [Reporting PPC Results](#reporting-ppc-results)
+    * [When PPCs Fail: Next Steps](#when-ppcs-fail-next-steps)
+  * [5.7 Residual Diagnostics](#57-residual-diagnostics)
+    * [Residual definition](#residual-definition)
+    * [5.7.1 Residual vs Fitted](#571-residual-vs-fitted)
+    * [5.7.2 Residual vs Time and Autocorrelation](#572-residual-vs-time-and-autocorrelation)
+    * [5.7.3 QQ Plot and Histogram](#573-qq-plot-and-histogram)
+      * [QQ Plot](#qq-plot)
+      * [Histogram](#histogram)
+    * [Shapiro-Wilk Test for Normality](#shapiro-wilk-test-for-normality)
+    * [5.7.4 Residual Variance by Flow Regime](#574-residual-variance-by-flow-regime)
+    * [5.7.5 Seasonal Residual Analysis](#575-seasonal-residual-analysis)
+    * [Quantitative diagnostics to report](#quantitative-diagnostics-to-report)
+    * [Actionable responses to diagnostics](#actionable-responses-to-diagnostics)
+    * [Advanced Diagnostic: Recursive Residuals](#advanced-diagnostic-recursive-residuals)
+    * [Residual Diagnostics in Model Selection](#residual-diagnostics-in-model-selection)
+    * [Summary: Iterative Refinement](#summary-iterative-refinement)---
 
 # 1. Introduction
 
@@ -3083,7 +3105,41 @@ Every component demonstrated here—prior specification, likelihood construction
 
 This section introduces a **full Bayesian calibration workflow** for the **GR4J hydrological model**, assuming **homoscedastic Gaussian residuals**. The aim is to estimate model parameters while **quantifying uncertainty** in both the hydrological model and observational errors.
 
-Bayesian calibration allows us to combine **prior knowledge about parameters** with **observed streamflow data** to obtain a **posterior distribution** representing updated knowledge about parameter values.
+## Overview of the GR4J Model
+
+The GR4J (Génie Rural à 4 paramètres Journalier) model is a parsimonious rainfall-runoff model developed by Cemagref (now INRAE) in France. It operates at a daily time step and uses only four core hydrological parameters to transform precipitation and potential evapotranspiration into streamflow. The model's structure consists of:
+
+1. **Production store** (governed by X1): Represents the soil moisture accounting component where rainfall is partitioned between actual evapotranspiration and runoff generation based on current storage levels.
+
+2. **Unit hydrographs**: Two unit hydrographs (UH1 and UH2) controlled by parameter X4 route the generated runoff. UH1 handles 90% of the net rainfall while UH2 routes the remaining 10%, introducing different timing characteristics.
+
+3. **Routing store** (governed by X3): A non-linear reservoir that simulates baseflow and slow groundwater contributions to streamflow.
+
+4. **Groundwater exchange** (governed by X2): Represents potential gains or losses to deep aquifers or neighboring catchments that are not directly observed.
+
+The **extended GR4J** version used here incorporates a **degree-day snow module** with two additional parameters (TT and DDF), making it suitable for catchments with seasonal snow accumulation and melt. This extension is critical for accurately simulating streamflow in mountainous or high-latitude regions where snowmelt dominates the hydrological regime during spring and early summer.
+
+The degree-day approach assumes that snowmelt is proportional to the temperature excess above a threshold (TT). When air temperature falls below TT, precipitation accumulates as snow; when temperature exceeds TT, snow melts at a rate determined by DDF (degree-day factor). This simple yet effective parameterization captures first-order snowmelt dynamics without requiring complex energy balance calculations.
+
+## Why Bayesian Calibration?
+
+Bayesian calibration offers several advantages over traditional optimization-based calibration methods:
+
+- **Uncertainty quantification**: Rather than obtaining single "best" parameter values, we obtain full posterior distributions that reflect parameter uncertainty given the available data and prior knowledge.
+
+- **Incorporation of prior information**: Expert knowledge, regional studies, or physical constraints can be formally encoded as prior distributions, preventing unrealistic parameter combinations.
+
+- **Predictive uncertainty**: Posterior distributions propagate through the model to generate probabilistic streamflow predictions with credible intervals, essential for risk-based water resources management.
+
+- **Diagnosis of identifiability issues**: Posterior correlations and marginal distributions reveal which parameters are well-constrained by data and which remain uncertain, guiding model refinement or data collection priorities.
+
+- **Flexible error modeling**: Bayesian frameworks naturally accommodate various error structures (heteroscedastic, autocorrelated, heavy-tailed) through likelihood specification.
+
+Bayesian calibration allows us to combine **prior knowledge about parameters** with **observed streamflow data** to obtain a **posterior distribution** representing updated knowledge about parameter values through Bayes' theorem:
+
+$$p(\theta \mid Q_{\text{obs}}) \propto p(Q_{\text{obs}} \mid \theta) \cdot p(\theta)$$
+
+where $p(\theta \mid Q_{\text{obs}})$ is the posterior distribution, $p(Q_{\text{obs}} \mid \theta)$ is the likelihood, and $p(\theta)$ is the prior distribution.
 
 **`params = c(X1, X2, X3, X4, TT, DDF)`**
 
@@ -3098,7 +3154,7 @@ Bayesian calibration allows us to combine **prior knowledge about parameters** w
 ### Parameter list and interpretation
 
 | **Parameter** | **Symbol** | **Meaning** | **Units** |
-|---|---:|---|---:|
+|---------------|------------|-------------|-----------|
 | Production store capacity | **X1** | Controls partitioning between evapotranspiration and runoff generation | mm |
 | Groundwater exchange coefficient | **X2** | Exchange between fast and slow components (model scaling) | dimensionless |
 | Routing store capacity | **X3** | Controls slow flow magnitude and baseflow | mm |
@@ -3106,6 +3162,90 @@ Bayesian calibration allows us to combine **prior knowledge about parameters** w
 | Temperature split | **TT** | Threshold for rain/snow split in degree‑day module | °C |
 | Degree‑day factor | **DDF** | Melt rate per °C above TT | mm °C⁻¹ day⁻¹ |
 | Residual SD | **σ** | Standard deviation of observation‑model residuals | m³/s |
+
+### Detailed Parameter Interpretation
+
+#### X1: Production Store Capacity (mm)
+
+The production store represents the catchment's soil moisture storage capacity. This parameter fundamentally controls the water balance partitioning:
+
+- **Low X1 values** (< 100 mm): The soil saturates quickly, leading to high runoff coefficients and flashy responses. This is typical of shallow soils, urban areas, or catchments with limited infiltration capacity.
+
+- **High X1 values** (> 500 mm): Deep soils with high water-holding capacity. More precipitation is retained and released as evapotranspiration, reducing runoff generation. Common in forested catchments with deep, permeable soils.
+
+- **Physical interpretation**: X1 approximates the product of soil depth, porosity, and the fraction of catchment actively contributing to runoff generation. However, it is an effective parameter that also absorbs model structural errors and spatial heterogeneity.
+
+- **Seasonal dynamics**: X1 implicitly affects seasonal flow patterns. High X1 catchments show delayed responses to precipitation and more sustained baseflows during dry periods due to soil moisture carryover.
+
+#### X2: Groundwater Exchange Coefficient (dimensionless)
+
+X2 represents inter-catchment groundwater exchange or losses to deep aquifers:
+
+- **X2 > 0**: Net gain from neighboring catchments or deep groundwater upwelling. This can occur in karst systems or where regional groundwater gradients favor inflow.
+
+- **X2 < 0**: Net loss to adjacent basins or deep percolation beyond the routing store. Common in catchments overlying permeable geology or fractured bedrock.
+
+- **X2 ≈ 0**: Minimal inter-catchment exchange, typical for hydrologically isolated basins with impermeable boundaries.
+
+- **Calibration challenges**: X2 is often poorly identifiable because its effects can be confounded with other water balance components. Consider fixing X2 = 0 if regional hydrogeology suggests minimal exchange, or use tracer studies or water balance analyses to inform priors.
+
+#### X3: Routing Store Capacity (mm)
+
+The routing store governs baseflow dynamics and recession behavior:
+
+- **Low X3 values** (< 50 mm): Rapid drainage, steep recession curves, and limited baseflow sustenance. Characteristic of impermeable catchments or shallow aquifers with high hydraulic conductivity.
+
+- **High X3 values** (> 200 mm): Slow drainage, gentle recessions, and sustained low flows during dry seasons. Typical of deep aquifer systems, permeable formations, or wetland-dominated basins.
+
+- **Recession analysis**: X3 directly influences the recession coefficient. Observed recession curves (plotting $\log Q$ vs. time during dry spells) can inform X3 priors. The recession slope relates to the routing store's time constant.
+
+- **Baseflow index**: Catchments with high baseflow indices (ratio of baseflow to total flow) generally require larger X3 values to sustain groundwater contributions.
+
+#### X4: Unit Hydrograph Time Base (days)
+
+X4 controls the timing and spread of the quickflow response:
+
+- **Low X4 values** (< 2 days): Sharp, peaked hydrograph responses with minimal lag. Appropriate for small, steep catchments with rapid concentration times.
+
+- **High X4 values** (> 10 days): Delayed, attenuated hydrograph peaks with broad distribution. Suitable for large, flat catchments or those with significant channel storage and floodplain attenuation.
+
+- **Time of concentration**: X4 approximates the catchment's time of concentration, though it also reflects channel routing and hillslope travel times. Standard empirical formulas (e.g., Kirpich, SCS) can provide initial estimates.
+
+- **Spatial scale**: X4 typically scales with catchment area, though terrain slope and drainage density also matter. Regionally calibrated relationships between X4 and catchment characteristics (area, slope, stream length) can inform priors.
+
+#### TT: Temperature Threshold (°C)
+
+TT determines when precipitation falls as snow versus rain:
+
+- **Typical range**: -2°C to +2°C for most temperate and alpine catchments. Maritime climates may have TT closer to 2°C, while continental climates favor values near 0°C or below.
+
+- **Mixed precipitation**: Around TT, precipitation is often mixed (rain and snow coexisting). The degree-day model treats this threshold as sharp, which is a simplification but generally adequate for daily modeling.
+
+- **Elevation effects**: TT should reflect the catchment's hypsometry (elevation distribution). Catchments with wide elevation ranges may require more sophisticated precipitation-phase partitioning (e.g., elevation-dependent TT), but the single-value approach works well for many applications.
+
+- **Observational constraints**: If snow depth or snow-covered area data are available, these can help constrain TT through posterior predictive checks on snow accumulation patterns.
+
+#### DDF: Degree-Day Factor (mm °C⁻¹ day⁻¹)
+
+DDF quantifies the snowmelt rate per degree above TT:
+
+- **Typical range**: 2–6 mm °C⁻¹ day⁻¹ for open sites; lower values (1–3) for forested areas where canopy reduces energy input. Alpine snow with high albedo may also show lower DDF.
+
+- **Energy balance approximation**: DDF is an empirical proxy for the energy balance. It implicitly integrates solar radiation, air temperature, humidity, and wind effects. As such, it varies with season, aspect, and forest cover.
+
+- **Literature priors**: Regional snowmelt studies often report DDF distributions. For example, European alpine studies suggest DDF ~ N(3.5, 1.0). Tailor priors to local conditions where possible.
+
+- **Seasonal variability**: Some studies estimate separate DDF values for different melt periods (early spring vs. late spring) to capture changes in snow albedo and energy input. The single-parameter approach here assumes an effective seasonal average.
+
+#### σ: Residual Standard Deviation (m³/s)
+
+σ quantifies the magnitude of model-data mismatch:
+
+- **Sources of residuals**: Includes measurement errors (rating curve uncertainty, sensor noise), model structural errors (missing processes, parameter aggregation), and input data errors (precipitation gauge network gaps, PET estimation).
+
+- **Scaling with discharge**: Homoscedastic σ assumes constant variance across flow magnitudes. In reality, errors often scale with discharge (heteroscedasticity). If residual diagnostics show funnel-shaped patterns, consider heteroscedastic likelihoods (Section 5.3).
+
+- **Informative priors on σ**: Upper bounds should reflect plausible total error. For example, if rating curve uncertainty is ±10% and typical flows are 20 m³/s, an upper bound of σ < 5 m³/s is reasonable. Avoid overly large σ priors that allow the model to "give up" on fitting data.
 
 ### Recommended example bounds (adjust to local catchment)
 
@@ -3125,17 +3265,44 @@ ub <- c(ub_hydro, ub_resid)
 
 ### Scientific rationale for bounds
 
-- **X1, X3 (mm):** Reflect catchment storage capacity (soil depth × porosity × contributing area). Upper bounds should be large enough to avoid truncating plausible values but can be narrowed using local soil and geology data.  
-- **X2 (dimensionless):** Exchange coefficient sign and magnitude depend on model formulation; allow a wide range if sign convention is uncertain.  
-- **X4 (days):** Typical values often fall in 1–20 days for many catchments; slow systems may require larger values.  
-- **TT (°C):** Temperature split should cover the local climatology (negative values for cold climates).  
-- **DDF (mm °C⁻¹ day⁻¹):** Degree‑day factors vary with snowpack properties; literature values often lie in a few mm °C⁻¹ day⁻¹.  
-- **σ (m³/s):** Expressed in discharge units; upper bound should reflect plausible measurement and model error (e.g., a fraction of peak flows).
+- **X1, X3 (mm):** Reflect catchment storage capacity (soil depth × porosity × contributing area). Upper bounds should be large enough to avoid truncating plausible values but can be narrowed using local soil and geology data. For instance, soil surveys providing field capacity and wilting point estimates can inform X1 ranges. Deep aquifer systems revealed by borehole data or groundwater models can guide X3 bounds.
+
+- **X2 (dimensionless):** Exchange coefficient sign and magnitude depend on model formulation; allow a wide range if sign convention is uncertain. If hydrogeological evidence (e.g., groundwater contour maps) indicates minimal exchange, consider narrowing bounds around zero or even fixing X2 = 0 to reduce dimensionality.
+
+- **X4 (days):** Typical values often fall in 1–20 days for many catchments; slow systems may require larger values. Empirical time-of-concentration formulas or analysis of observed storm hydrographs can provide initial guidance. For large catchments (> 1000 km²), X4 may exceed 20 days due to channel routing delays.
+
+- **TT (°C):** Temperature split should cover the local climatology (negative values for cold climates). If the catchment rarely experiences freezing temperatures, narrow the range (e.g., 0–5°C). Conversely, high-elevation or high-latitude sites may require TT as low as -10°C to -15°C.
+
+- **DDF (mm °C⁻¹ day⁻¹):** Degree‑day factors vary with snowpack properties; literature values often lie in a few mm °C⁻¹ day⁻¹. Forest cover, slope aspect, and snow albedo all influence DDF. If regional studies exist, use those ranges. Otherwise, 0–10 mm °C⁻¹ day⁻¹ is a conservative default, though values above 6 are rare.
+
+- **σ (m³/s):** Expressed in discharge units; upper bound should reflect plausible measurement and model error (e.g., a fraction of peak flows). Avoid setting σ upper bounds so high that the model can fit noise. A practical rule: σ_max ~ 0.2 × (95th percentile of observed discharge).
+
+### Parameter Transformation Strategies
+
+For some parameters, working in transformed space improves sampler efficiency:
+
+- **Log-transform X1, X3**: These span orders of magnitude. Sampling $\log(X1)$ and $\log(X3)$ with uniform or normal priors in log-space often yields better exploration than uniform priors in linear space.
+
+- **Logit-transform for bounded parameters**: If you want to constrain X2 to (-5, 5) but sample more efficiently, transform to logit scale.
+
+- **Standardization**: If using Hamiltonian Monte Carlo (e.g., Stan), standardize parameters to have comparable scales (mean 0, SD 1 in prior space) to improve sampler geometry.
+
+Example: sampling X1 in log-space:
+
+```r
+# Prior in log-space: log(X1) ~ Uniform(log(1e-3), log(3000))
+log_prior_transformed <- function(log_theta, log_lb, log_ub) {
+  if (any(log_theta < log_lb) || any(log_theta > log_ub)) return(-Inf)
+  # Jacobian adjustment for log-transform
+  return(sum(dunif(log_theta, log_lb, log_ub, log = TRUE)) - sum(log_theta))
+}
+```
 
 **Practical guidance**
-- Document bounds and units in the repository README and function docstrings.  
-- Use prior predictive checks (simulate from priors) to verify that bounds produce physically plausible hydrographs.  
+- Document bounds and units in the repository README and function docstrings.
+- Use prior predictive checks (simulate from priors) to verify that bounds produce physically plausible hydrographs.
 - Tighten bounds when identifiability issues arise or when local studies provide reliable constraints.
+- When calibrating multiple catchments, consider hierarchical priors where regional parameters inform individual catchment priors, borrowing strength across sites.
 
 ---
 
@@ -3145,15 +3312,15 @@ ub <- c(ub_hydro, ub_resid)
 
 ### Uniform prior (default)
 
-For each parameter \( \theta_i \):
+For each parameter $\theta_i$:
 
-\[
+$$
 p(\theta_i) =
 \begin{cases}
-\dfrac{1}{\text{ub}_i - \text{lb}_i} & \theta_i \in [\text{lb}_i,\text{ub}_i] \\
+\dfrac{1}{\text{ub}_i - \text{lb}_i} & \theta_i \in [\text{lb}_i,\text{ub}_i] \\\\
 0 & \text{otherwise}
 \end{cases}
-\]
+$$
 
 **R implementation**
 
@@ -3166,15 +3333,15 @@ log_prior <- function(theta, lb, ub) {
 
 ### Alternative priors and when to use them
 
-- **Truncated normal**: use when literature suggests a plausible center and uncertainty (e.g., DDF from snow studies).  
-- **Log‑normal**: use for strictly positive parameters spanning orders of magnitude (X1, X3).  
+- **Truncated normal**: use when literature suggests a plausible center and uncertainty (e.g., DDF from snow studies).
+- **Log‑normal**: use for strictly positive parameters spanning orders of magnitude (X1, X3).
 - **Hierarchical priors**: use when calibrating multiple catchments jointly to share information across basins.
 
 ### Prior predictive checks
 
-1. Sample \(\theta \sim p(\theta)\).  
-2. Simulate \(Q_{\text{sim}}(\theta)\) with the simulator.  
-3. Inspect simulated hydrographs for physical realism (seasonality, magnitudes).  
+1. Sample $\theta \sim p(\theta)$.
+2. Simulate $Q_{\text{sim}}(\theta)$ with the simulator.
+3. Inspect simulated hydrographs for physical realism (seasonality, magnitudes).
 4. Revise priors/bounds if prior predictive simulations are unrealistic.
 
 ---
@@ -3187,15 +3354,11 @@ log_prior <- function(theta, lb, ub) {
 
 Assume independent, identically distributed Gaussian residuals:
 
-\[
-Q_{\text{obs},t} \sim \mathcal{N}\big(Q_{\text{sim},t}(\theta),\sigma^2\big)
-\]
+$$Q_{\text{obs},t} \sim \mathcal{N}\big(Q_{\text{sim},t}(\theta),\sigma^2\big)$$
 
 Log‑likelihood:
 
-\[
-\log L(\theta) = \sum_{t=1}^T \left[ -\frac{1}{2}\log(2\pi\sigma^2) - \frac{(Q_{\text{obs},t}-Q_{\text{sim},t}(\theta))^2}{2\sigma^2} \right]
-\]
+$$\log L(\theta) = \sum_{t=1}^T \left[ -\frac{1}{2}\log(2\pi\sigma^2) - \frac{(Q_{\text{obs},t}-Q_{\text{sim},t}(\theta))^2}{2\sigma^2} \right]$$
 
 **R implementation (homoscedastic)**
 
@@ -3220,19 +3383,15 @@ log_likelihood_homo <- function(theta, P_xts, T_xts, PET_xts = NULL,
 
 **Heteroscedastic Gaussian** — variance grows with flow:
 
-\[
-\sigma_t = \sigma_0 (1 + \alpha Q_{\text{sim},t})
-\]
+$$\sigma_t = \sigma_0 (1 + \alpha Q_{\text{sim},t})$$
 
 **AR(1) residuals** — temporal correlation:
 
-\[
-r_t = Q_{\text{obs},t} - Q_{\text{sim},t},\quad r_t = \phi r_{t-1} + \varepsilon_t,\quad \varepsilon_t\sim\mathcal{N}(0,\sigma^2)
-\]
+$$r_t = Q_{\text{obs},t} - Q_{\text{sim},t},\quad r_t = \phi r_{t-1} + \varepsilon_t,\quad \varepsilon_t\sim\mathcal{N}(0,\sigma^2)$$
 
-**Student‑t** — robust to outliers; parameterized by degrees of freedom \(\nu\).
+**Student‑t** — robust to outliers; parameterized by degrees of freedom $\nu$.
 
-**Log‑space likelihood** — model \(\log Q\) when multiplicative errors dominate.
+**Log‑space likelihood** — model $\log Q$ when multiplicative errors dominate.
 
 **R examples (heteroscedastic and AR(1))**
 
@@ -3276,10 +3435,10 @@ log_likelihood_ar1 <- function(theta, P_xts, T_xts, PET_xts = NULL,
 
 ### Likelihood selection checklist
 
-1. Fit with homoscedastic Gaussian.  
-2. Compute residual diagnostics (Section 5.7).  
-3. If residual variance increases with flow → heteroscedastic or log‑space likelihood.  
-4. If residuals show temporal correlation → AR(1) residuals.  
+1. Fit with homoscedastic Gaussian.
+2. Compute residual diagnostics (Section 5.7).
+3. If residual variance increases with flow → heteroscedastic or log‑space likelihood.
+4. If residuals show temporal correlation → AR(1) residuals.
 5. If heavy tails/outliers → Student‑t likelihood.
 
 ---
@@ -3288,9 +3447,7 @@ log_likelihood_ar1 <- function(theta, P_xts, T_xts, PET_xts = NULL,
 
 **Definition.** The log‑posterior is the sum of the log‑prior and the log‑likelihood:
 
-\[
-\log p(\theta \mid Q_{\text{obs}}) = \log L(\theta) + \log p(\theta)
-\]
+$$\log p(\theta \mid Q_{\text{obs}}) = \log L(\theta) + \log p(\theta)$$
 
 **R wrapper (pluggable likelihood)**
 
@@ -3306,8 +3463,8 @@ log_posterior <- function(theta, lb, ub, P_xts, T_xts, PET_xts,
 
 ### Scientific considerations
 
-- **Posterior geometry**: multimodality, ridges, and narrow valleys affect sampler choice and tuning.  
-- **Identifiability**: strong posterior correlations (e.g., between X1 and DDF) indicate structural non‑identifiability; consider reparameterization, fixing parameters, or informative priors.  
+- **Posterior geometry**: multimodality, ridges, and narrow valleys affect sampler choice and tuning.
+- **Identifiability**: strong posterior correlations (e.g., between X1 and DDF) indicate structural non‑identifiability; consider reparameterization, fixing parameters, or informative priors.
 - **Transformations**: log‑transform positive parameters to stabilize sampling and reduce skewness.
 
 ---
@@ -3350,16 +3507,16 @@ colnames(samples) <- c("X1","X2","X3","X4","TT","DDF","sigma")
 
 ### MCMC best practices
 
-- **Multiple chains**: run at least 3 chains with dispersed initial values.  
-- **Convergence diagnostics**: compute R̂ (Gelman–Rubin), inspect traceplots, and check effective sample size (ESS).  
-- **Acceptance rate**: target ~0.2–0.3 for random‑walk Metropolis; adaptMCMC tunes proposals automatically.  
-- **Posterior exploration**: visualize marginal densities and pairwise scatterplots to detect multimodality or ridges.  
+- **Multiple chains**: run at least 3 chains with dispersed initial values.
+- **Convergence diagnostics**: compute R̂ (Gelman–Rubin), inspect traceplots, and check effective sample size (ESS).
+- **Acceptance rate**: target ~0.2–0.3 for random‑walk Metropolis; adaptMCMC tunes proposals automatically.
+- **Posterior exploration**: visualize marginal densities and pairwise scatterplots to detect multimodality or ridges.
 - **Reproducibility**: set random seeds, save raw chains, and record `sessionInfo()`.
 
 ### Computational tips
 
-- **Parallelize chains** to reduce wall time.  
-- **Profile** `gr4j_sim` to identify bottlenecks; vectorize or optimize inner loops where possible.  
+- **Parallelize chains** to reduce wall time.
+- **Profile** `gr4j_sim` to identify bottlenecks; vectorize or optimize inner loops where possible.
 - **Use short test runs** to tune sampler settings before long runs.
 
 ---
@@ -3368,17 +3525,37 @@ colnames(samples) <- c("X1","X2","X3","X4","TT","DDF","sigma")
 
 **Purpose.** Evaluate whether posterior samples reproduce observed flows and quantify predictive uncertainty.
 
+Posterior predictive checks are the cornerstone of Bayesian model validation. They answer the fundamental question: **"If the model and fitted parameters are correct, could they have generated data like what we actually observed?"** PPCs go beyond traditional goodness-of-fit metrics by:
+
+1. **Assessing model adequacy**: Do simulations capture the full range of observed behaviors (extremes, seasonality, autocorrelation)?
+2. **Quantifying predictive uncertainty**: Are prediction intervals well-calibrated (coverage matches nominal levels)?
+3. **Diagnosing model deficiencies**: Where does the model systematically fail, and what processes might be missing?
+
+### Theoretical Foundation
+
+The posterior predictive distribution is:
+
+$$p(Q_{\text{pred}} \mid Q_{\text{obs}}) = \int p(Q_{\text{pred}} \mid \theta) \, p(\theta \mid Q_{\text{obs}}) \, d\theta$$
+
+This integrates over parameter uncertainty: for each posterior sample $\theta^{(i)}$, we simulate $Q_{\text{sim}}^{(i)}$ and then draw $Q_{\text{pred}}^{(i)}$ from the likelihood. The ensemble of $Q_{\text{pred}}^{(i)}$ represents our predictive uncertainty, combining:
+
+- **Parameter uncertainty**: Different $\theta$ values produce different simulated flows.
+- **Residual variability**: The likelihood adds noise (e.g., Gaussian with $\sigma^{(i)}$) around each simulation.
+
 ### Procedure
 
-1. Draw posterior samples \(\theta^{(i)}\).  
-2. For each \(\theta^{(i)}\), simulate \(Q_{\text{sim}}^{(i)}\) with the simulator.  
-3. Draw predictive replicates \(Q_{\text{pred},t}^{(i)} \sim p(Q_t \mid \theta^{(i)})\) using the likelihood (e.g., add Gaussian noise with \(\sigma^{(i)}\)).  
-4. Compare observed \(Q_{\text{obs}}\) to the ensemble of \(Q_{\text{pred}}^{(i)}\) visually and with summary statistics.
+1. Draw posterior samples $\theta^{(i)}$ from the MCMC chain (thin if necessary to reduce autocorrelation).
+2. For each $\theta^{(i)}$, run the GR4J simulator to obtain $Q_{\text{sim}}^{(i)}$.
+3. Draw predictive replicates $Q_{\text{pred},t}^{(i)} \sim p(Q_t \mid \theta^{(i)})$ using the likelihood. For homoscedastic Gaussian errors:
+
+$$Q_{\text{pred},t}^{(i)} = Q_{\text{sim},t}^{(i)} + \epsilon_t^{(i)}, \quad \epsilon_t^{(i)} \sim \mathcal{N}(0, [\sigma^{(i)}]^2)$$
+
+4. Compare observed $Q_{\text{obs}}$ to the ensemble of $Q_{\text{pred}}^{(i)}$ visually and with summary statistics.
 
 ### R code (ensemble PPC)
 
 ```r
-n_pred <- 200
+n_pred <- 200  # Number of posterior samples to use for predictions
 pred_idx <- sample(1:nrow(samples), n_pred)
 merged_obs <- merge(gr4j_sim(P_xts, T_xts, PET_xts, samples[1,1:6], area_km2),
                     Q_obs_xts, all = FALSE)
@@ -3393,31 +3570,326 @@ for (i in seq_len(n_pred)) {
   Q_sim_xts <- gr4j_sim(P_xts, T_xts, PET_xts, hydro_params, area_km2)
   merged <- merge(Q_sim_xts, Q_obs_xts, all = FALSE)
   Q_sim <- as.numeric(merged[,1])
+  
+  # Add residual noise to create predictive replicates
   Q_pred_samples[i, ] <- rnorm(length(Q_sim), mean = Q_sim, sd = sigma_i)
 }
 
+# Compute summary statistics
 Q_mean_pred <- colMeans(Q_pred_samples)
+Q_median_pred <- apply(Q_pred_samples, 2, median)
+Q_lower_50 <- apply(Q_pred_samples, 2, quantile, probs = 0.25)
+Q_upper_50 <- apply(Q_pred_samples, 2, quantile, probs = 0.75)
+Q_lower_90 <- apply(Q_pred_samples, 2, quantile, probs = 0.05)
+Q_upper_90 <- apply(Q_pred_samples, 2, quantile, probs = 0.95)
 ```
+
+### Visual PPC Diagnostics
+
+#### Time Series Plot with Uncertainty Bands
+
+This is the most informative PPC plot: observed flows overlaid on predictive intervals.
+
+```r
+# Extract time index from merged data
+time_index <- index(merged_obs)
+Q_obs <- as.numeric(merged_obs[,2])
+
+# Plot setup
+par(mfrow = c(1,1), mar = c(4,4,2,1))
+plot(time_index, Q_obs, type = "n", ylim = range(c(Q_obs, Q_pred_samples), na.rm = TRUE),
+     xlab = "Time", ylab = "Discharge (m3/s)", 
+     main = "Posterior Predictive Check: Observed vs Predicted")
+
+# 90% credible interval (light shading)
+polygon(c(time_index, rev(time_index)), 
+        c(Q_lower_90, rev(Q_upper_90)),
+        col = rgb(0.7, 0.7, 0.7, 0.3), border = NA)
+
+# 50% credible interval (darker shading)
+polygon(c(time_index, rev(time_index)), 
+        c(Q_lower_50, rev(Q_upper_50)),
+        col = rgb(0.5, 0.5, 0.5, 0.4), border = NA)
+
+# Posterior mean prediction
+lines(time_index, Q_mean_pred, col = "blue", lwd = 2)
+
+# Observed data
+points(time_index, Q_obs, pch = 19, cex = 0.5, col = "black")
+
+legend("topright", 
+       c("Observed", "Posterior Mean", "50% Interval", "90% Interval"),
+       col = c("black", "blue", rgb(0.5,0.5,0.5,0.4), rgb(0.7,0.7,0.7,0.3)),
+       pch = c(19, NA, 15, 15), lty = c(NA, 1, NA, NA), lwd = c(NA, 2, NA, NA))
+```
+
+**Interpretation:**
+- Observations should be scattered throughout the predictive bands, not systematically above or below.
+- Narrower bands indicate lower uncertainty (well-constrained parameters and small $\sigma$).
+- If observations frequently fall outside 90% intervals, the model is overconfident (underestimating uncertainty).
+
+#### Spaghetti Plot: Overlay of Multiple Realizations
+
+Instead of summary intervals, plot a subset of individual predictive trajectories.
+
+```r
+plot(time_index, Q_obs, type = "l", lwd = 2, col = "black",
+     ylim = range(c(Q_obs, Q_pred_samples[1:50,]), na.rm = TRUE),
+     xlab = "Time", ylab = "Discharge (m3/s)",
+     main = "Spaghetti Plot: 50 Posterior Predictive Realizations")
+
+# Overlay 50 random realizations
+for (i in 1:50) {
+  lines(time_index, Q_pred_samples[i,], col = rgb(0, 0, 1, 0.1))
+}
+
+# Re-draw observed on top
+lines(time_index, Q_obs, lwd = 2, col = "black")
+```
+
+**Interpretation:**
+- The "cloud" of blue lines represents model spread.
+- Observed trajectory should weave through the cloud naturally.
+- Dense regions indicate where model is confident; sparse regions indicate high uncertainty.
+
+#### Flow Duration Curve (FDC) Comparison
+
+FDCs reveal whether the model captures the full distribution of flows, especially extremes.
+
+```r
+# Compute empirical FDC for observed data
+Q_obs_sorted <- sort(Q_obs, decreasing = TRUE)
+exceedance_prob <- seq_along(Q_obs_sorted) / length(Q_obs_sorted)
+
+# Compute FDCs for each predictive realization
+Q_pred_fdc <- apply(Q_pred_samples, 1, function(x) sort(x, decreasing = TRUE))
+
+# Plot observed FDC
+plot(exceedance_prob, Q_obs_sorted, type = "l", lwd = 3, col = "black",
+     log = "y", xlab = "Exceedance Probability", ylab = "Discharge (m3/s)",
+     main = "Flow Duration Curve: Observed vs Predictive Ensemble")
+
+# Overlay predictive FDCs (thinned for clarity)
+for (i in seq(1, n_pred, by = 10)) {
+  lines(exceedance_prob, Q_pred_fdc[,i], col = rgb(0, 0, 1, 0.2))
+}
+
+# Re-draw observed on top
+lines(exceedance_prob, Q_obs_sorted, lwd = 3, col = "black")
+
+legend("topright", c("Observed", "Predictive Ensemble"),
+       col = c("black", "blue"), lwd = c(3, 1))
+```
+
+**Interpretation:**
+- **High flows** (left side, low exceedance): Model should capture peak flow magnitudes. Systematic underprediction indicates missing flood processes or parameter issues.
+- **Low flows** (right side, high exceedance): Model should reproduce baseflow levels. Overprediction suggests excessive groundwater contribution (X3 too large).
+- **Mid-range flows**: Check for bias in the central tendency.
 
 ### PPC diagnostics and interpretation
 
-- **Visual cloud plot**: overlay observed series on many predictive realizations; observations should fall within predictive spread across quantiles.  
-- **Coverage**: compute the fraction of observations within 50% and 90% predictive intervals.  
-- **Tail behavior**: check whether extremes (high flows) are captured; if not, consider heteroscedastic or heavy‑tailed likelihoods.  
-- **Predictive metrics**: compute NSE and KGE on predictive ensembles (report median and credible intervals).
+#### Coverage Analysis
+
+Quantify the fraction of observations falling within predictive intervals:
+
+```r
+# Compute coverage for 50% and 90% intervals
+coverage_50 <- mean(Q_obs >= Q_lower_50 & Q_obs <= Q_upper_50, na.rm = TRUE)
+coverage_90 <- mean(Q_obs >= Q_lower_90 & Q_obs <= Q_upper_90, na.rm = TRUE)
+
+cat("50% Credible Interval Coverage:", round(coverage_50, 3), "\n")
+cat("90% Credible Interval Coverage:", round(coverage_90, 3), "\n")
+```
+
+**Expected coverage:** 50% interval should contain ~50% of observations; 90% interval should contain ~90%.
+
+**Deviations:**
+- **Undercoverage** (e.g., 30% in 50% interval, 70% in 90% interval): Model is overconfident. Possible causes:
+  - $\sigma$ is underestimated (too small).
+  - Model structure is inadequate (missing processes).
+  - Likelihood assumption is violated (e.g., heteroscedasticity not accounted for).
+  
+- **Overcoverage** (e.g., 70% in 50% interval, 98% in 90% interval): Model is too uncertain. Possible causes:
+  - $\sigma$ is overestimated.
+  - Priors are too diffuse, allowing unrealistic parameter combinations.
+  - Data are more informative than model structure allows (overparameterization).
+
+#### Conditional Coverage: Coverage by Flow Regime
+
+Check if coverage varies across flow magnitudes:
+
+```r
+# Divide observations into terciles (low, medium, high flows)
+Q_terciles <- quantile(Q_obs, probs = c(1/3, 2/3), na.rm = TRUE)
+low_flow_idx <- Q_obs <= Q_terciles[1]
+mid_flow_idx <- Q_obs > Q_terciles[1] & Q_obs <= Q_terciles[2]
+high_flow_idx <- Q_obs > Q_terciles[2]
+
+# Coverage by regime
+coverage_50_low <- mean(Q_obs[low_flow_idx] >= Q_lower_50[low_flow_idx] & 
+                        Q_obs[low_flow_idx] <= Q_upper_50[low_flow_idx], na.rm = TRUE)
+coverage_50_high <- mean(Q_obs[high_flow_idx] >= Q_lower_50[high_flow_idx] & 
+                         Q_obs[high_flow_idx] <= Q_upper_50[high_flow_idx], na.rm = TRUE)
+
+cat("50% Coverage (Low Flows):", round(coverage_50_low, 3), "\n")
+cat("50% Coverage (High Flows):", round(coverage_50_high, 3), "\n")
+```
+
+**Interpretation:**
+- **Poor high-flow coverage**: Model struggles with extremes. Consider heteroscedastic likelihood or additional flood processes.
+- **Poor low-flow coverage**: Baseflow simulation is biased or uncertain. Check X3, consider recession analysis.
+
+#### Tail Behavior: Extreme Event Capture
+
+Extract maximum observed flow and compare to predictive distribution of maxima:
+
+```r
+Q_obs_max <- max(Q_obs, na.rm = TRUE)
+Q_pred_max <- apply(Q_pred_samples, 1, max, na.rm = TRUE)
+
+hist(Q_pred_max, breaks = 30, col = "lightblue", border = "white",
+     xlab = "Maximum Discharge (m3/s)", main = "Predictive Distribution of Peak Flow")
+abline(v = Q_obs_max, col = "red", lwd = 3, lty = 2)
+legend("topright", "Observed Max", col = "red", lwd = 3, lty = 2)
+
+# Compute p-value: what fraction of predictive maxima exceed observed max?
+p_val_max <- mean(Q_pred_max >= Q_obs_max)
+cat("P-value (observed max vs predictive):", round(p_val_max, 3), "\n")
+```
+
+**Interpretation:**
+- If $p < 0.05$, observed maximum is unusually high given the model—suggests missing flood processes or underestimated parameter uncertainty.
+- If $p > 0.95$, observed maximum is unusually low—model may be overestimating flood risk or parameters are biased high.
+
+### Predictive Performance Metrics
+
+Compute NSE and KGE on predictive ensembles:
 
 **Nash–Sutcliffe Efficiency (NSE)**
 
-\[
-\text{NSE} = 1 - \frac{\sum_t (Q_{\text{obs},t} - Q_{\text{sim},t})^2}{\sum_t (Q_{\text{obs},t} - \overline{Q}_{\text{obs}})^2}
-\]
+$$\text{NSE} = 1 - \frac{\sum_t (Q_{\text{obs},t} - Q_{\text{sim},t})^2}{\sum_t (Q_{\text{obs},t} - \overline{Q}_{\text{obs}})^2}$$
+
+For Bayesian ensembles, compute NSE for each posterior sample and report the distribution:
+
+```r
+NSE_ensemble <- numeric(n_pred)
+Q_obs_mean <- mean(Q_obs, na.rm = TRUE)
+
+for (i in 1:n_pred) {
+  Q_sim_i <- Q_pred_samples[i, ]  # or use deterministic Q_sim without noise for NSE
+  NSE_ensemble[i] <- 1 - sum((Q_obs - Q_sim_i)^2, na.rm = TRUE) / 
+                         sum((Q_obs - Q_obs_mean)^2, na.rm = TRUE)
+}
+
+cat("NSE Median:", round(median(NSE_ensemble), 3), "\n")
+cat("NSE 90% CI:", round(quantile(NSE_ensemble, c(0.05, 0.95)), 3), "\n")
+```
 
 **Kling–Gupta Efficiency (KGE)** (one common formulation)
 
-\[
-\text{KGE} = 1 - \sqrt{(r-1)^2 + (\alpha-1)^2 + (\beta-1)^2}
-\]
-where \(r\) is correlation, \(\alpha = \frac{\sigma_{\text{sim}}}{\sigma_{\text{obs}}}\), and \(\beta = \frac{\mu_{\text{sim}}}{\mu_{\text{obs}}}\).
+$$\text{KGE} = 1 - \sqrt{(r-1)^2 + (\alpha-1)^2 + (\beta-1)^2}$$
+
+where $r$ is correlation, $\alpha = \frac{\sigma_{\text{sim}}}{\sigma_{\text{obs}}}$, and $\beta = \frac{\mu_{\text{sim}}}{\mu_{\text{obs}}}$.
+
+```r
+KGE_ensemble <- numeric(n_pred)
+
+for (i in 1:n_pred) {
+  Q_sim_i <- Q_pred_samples[i, ]
+  r <- cor(Q_obs, Q_sim_i, use = "complete.obs")
+  alpha <- sd(Q_sim_i, na.rm = TRUE) / sd(Q_obs, na.rm = TRUE)
+  beta <- mean(Q_sim_i, na.rm = TRUE) / mean(Q_obs, na.rm = TRUE)
+  KGE_ensemble[i] <- 1 - sqrt((r - 1)^2 + (alpha - 1)^2 + (beta - 1)^2)
+}
+
+cat("KGE Median:", round(median(KGE_ensemble), 3), "\n")
+cat("KGE 90% CI:", round(quantile(KGE_ensemble, c(0.05, 0.95)), 3), "\n")
+```
+
+**Interpretation:**
+- NSE and KGE both range from $-\infty$ to 1 (perfect fit).
+- NSE > 0.5 and KGE > 0.5 are often considered acceptable for hydrological models.
+- Report median and credible intervals to show uncertainty in performance metrics themselves.
+
+### Seasonal and Regime-Specific PPCs
+
+Hydrological models often fail in specific seasons or flow regimes. Subset PPCs by:
+
+- **Season**: Calibrate on full year, but check winter vs. summer performance separately.
+- **Snowmelt period**: For snow-dominated catchments, isolate April-June and check if melt timing and magnitude are captured.
+- **Recession periods**: Subset dry spells and check baseflow recession behavior.
+
+Example: PPC for snowmelt season only:
+
+```r
+# Assume time_index is a Date or POSIXct object
+snowmelt_months <- format(time_index, "%m") %in% c("04", "05", "06")
+
+Q_obs_snowmelt <- Q_obs[snowmelt_months]
+Q_pred_snowmelt <- Q_pred_samples[, snowmelt_months]
+
+# Repeat plots and coverage analysis for snowmelt subset
+```
+
+### Advanced PPC: Test Statistics
+
+Instead of raw time series, compute summary statistics on observed vs. predictive data:
+
+- **Autocorrelation at lag 1**: Does model capture persistence?
+- **Coefficient of variation**: Does model reproduce flow variability?
+- **Skewness**: Does model match the asymmetry of the flow distribution?
+
+```r
+# Compute test statistic: lag-1 autocorrelation
+acf_obs <- acf(Q_obs, lag.max = 1, plot = FALSE)$acf[2]
+acf_pred <- apply(Q_pred_samples, 1, function(x) acf(x, lag.max = 1, plot = FALSE)$acf[2])
+
+hist(acf_pred, breaks = 30, col = "lightblue", border = "white",
+     xlab = "Lag-1 Autocorrelation", main = "PPC: Autocorrelation Structure")
+abline(v = acf_obs, col = "red", lwd = 3, lty = 2)
+legend("topright", "Observed ACF(1)", col = "red", lwd = 3, lty = 2)
+
+# p-value: fraction of predictive ACF more extreme than observed
+p_val_acf <- mean(abs(acf_pred - mean(acf_pred)) >= abs(acf_obs - mean(acf_pred)))
+cat("P-value (autocorrelation):", round(p_val_acf, 3), "\n")
+```
+
+**Interpretation:**
+- If observed ACF falls in the tails of the predictive distribution, the model may not capture temporal dependencies well.
+- Consider AR(1) residuals or additional routing dynamics if autocorrelation is systematically mismatched.
+
+### Reporting PPC Results
+
+A comprehensive PPC report should include:
+
+1. **Time series plot** with 50% and 90% credible intervals.
+2. **Coverage statistics** (overall and by flow regime).
+3. **Flow duration curve** comparison.
+4. **NSE and KGE** distributions (median and 90% CI).
+5. **Extreme event analysis** (maxima, minima).
+6. **Seasonal subset** PPCs if relevant.
+7. **Test statistics** (autocorrelation, variance, skewness) if model assumptions are questionable.
+
+Example summary table:
+
+| **Metric** | **Observed** | **Predictive Median** | **Predictive 90% CI** |
+|---|---:|---:|---:|
+| Mean Q (m³/s) | 15.2 | 15.1 | [14.5, 15.8] |
+| Max Q (m³/s) | 89.3 | 85.7 | [72.1, 102.4] |
+| 50% Coverage | — | 52% | — |
+| 90% Coverage | — | 88% | — |
+| NSE | — | 0.78 | [0.72, 0.83] |
+| KGE | — | 0.81 | [0.76, 0.85] |
+
+### When PPCs Fail: Next Steps
+
+If PPCs reveal systematic deficiencies:
+
+1. **Heteroscedasticity**: Adopt heteroscedastic or log-space likelihood (Section 5.3).
+2. **Autocorrelation**: Include AR(1) residuals.
+3. **Missing processes**: Add snow module parameters, improve PET estimation, or consider distributed routing.
+4. **Parameter identifiability**: Strong correlations or wide posteriors suggest fixing some parameters or using informative priors.
+5. **Structural inadequacy**: GR4J may be too simple for the catchment. Consider more complex models (e.g., SWAT, VIC) or hybrid approaches.
 
 ---
 
@@ -3425,13 +3897,17 @@ where \(r\) is correlation, \(\alpha = \frac{\sigma_{\text{sim}}}{\sigma_{\text{
 
 **Purpose.** Validate likelihood assumptions and guide model or likelihood refinement.
 
+Residual diagnostics are essential for assessing whether the statistical assumptions underlying the Bayesian inference are met. Violations of these assumptions (e.g., non-constant variance, autocorrelation, non-normality) can lead to:
+
+- **Biased parameter estimates**: Parameters may be pulled toward values that compensate for unmodeled error structures.
+- **Incorrect uncertainty quantification**: Credible intervals and predictive intervals may be too narrow or too wide.
+- **Poor out-of-sample performance**: Models calibrated with incorrect error assumptions often fail when applied to new data or future periods.
+
 ### Residual definition
 
-\[
-r_t = Q_{\text{obs},t} - \bar{Q}_{\text{pred},t}
-\]
+$$r_t = Q_{\text{obs},t} - \bar{Q}_{\text{pred},t}$$
 
-where \(\bar{Q}_{\text{pred},t}\) is the posterior predictive mean.
+where $\bar{Q}_{\text{pred},t}$ is the posterior predictive mean (or median; choice depends on reporting preference).
 
 **Compute residuals (aligned index)**
 
@@ -3439,61 +3915,320 @@ where \(\bar{Q}_{\text{pred},t}\) is the posterior predictive mean.
 residuals <- as.numeric(merged_obs[,2]) - Q_mean_pred
 ```
 
+Note: For heteroscedastic or AR(1) likelihoods, compute **standardized residuals** to account for varying variances or temporal structure.
+
 ### 5.7.1 Residual vs Fitted
 
+This plot reveals heteroscedasticity (variance changing with discharge magnitude).
+
 ```r
-plot(Q_mean_pred, residuals, pch=19, col="steelblue",
+plot(Q_mean_pred, residuals, pch=19, col="steelblue", cex = 0.7,
      xlab="Posterior mean prediction (m3/s)", ylab="Residuals (m3/s)",
      main="Residuals vs Posterior Mean Prediction")
-abline(h=0, col="red", lty=2)
+abline(h=0, col="red", lty=2, lwd=2)
+
+# Add loess smoother to detect systematic bias
+loess_fit <- loess(residuals ~ Q_mean_pred)
+lines(sort(Q_mean_pred), predict(loess_fit, sort(Q_mean_pred)), 
+      col = "orange", lwd = 2)
 ```
 
-- **Centered residuals** around zero indicate unbiased predictions.  
-- **Funnel pattern** indicates heteroscedasticity; consider heteroscedastic or log‑space likelihood.
+**Interpretation:**
+
+- **Centered residuals** around zero (red line) indicate unbiased predictions on average.
+- **Loess curve deviating from zero**: Systematic bias. For example:
+  - Curve above zero at high flows → model underpredicts peaks.
+  - Curve below zero at low flows → model overpredicts baseflow.
+  
+- **Funnel pattern** (variance increasing with $Q_{\text{pred}}$): Classic sign of heteroscedasticity. Residual variance grows with discharge magnitude, violating the homoscedastic Gaussian assumption. 
+  - **Action**: Adopt heteroscedastic likelihood where $\sigma_t = \sigma_0 (1 + \alpha Q_{\text{sim},t})$, or work in log-space.
+  
+- **Reverse funnel** (variance decreasing with $Q_{\text{pred}}$): Rare but possible; may indicate measurement errors are proportionally larger at low flows.
+
+- **Outliers**: Points far from the zero line. Investigate specific events:
+  - Extreme rainfall events not captured by precipitation data?
+  - Anthropogenic influences (dam releases, abstractions)?
+  - Rating curve errors at extreme stages?
 
 ### 5.7.2 Residual vs Time and Autocorrelation
 
-```r
-plot(1:length(residuals), residuals, type="b", pch=19, col="darkgreen",
-     xlab="Time step", ylab="Residuals", main="Residuals vs Time")
-abline(h=0, col="red", lty=2)
+Temporal plots reveal trends, seasonality, and autocorrelation.
 
-acf(residuals, main="Autocorrelation of Residuals")
+```r
+# Residual time series
+plot(1:length(residuals), residuals, type="b", pch=19, col="darkgreen", cex=0.5,
+     xlab="Time step", ylab="Residuals (m3/s)", main="Residuals vs Time")
+abline(h=0, col="red", lty=2, lwd=2)
+
+# Add seasonal loess smoother
+loess_time <- loess(residuals ~ seq_along(residuals), span = 0.1)
+lines(seq_along(residuals), predict(loess_time), col = "blue", lwd = 2)
 ```
 
-- **No trend and low ACF** → homoscedastic Gaussian may be adequate.  
-- **Significant ACF** → include AR(1) residuals or add missing process dynamics.
+**Interpretation:**
+
+- **Random scatter around zero**: No systematic temporal bias—good!
+- **Seasonal pattern**: Loess curve shows periodic swings (e.g., consistent overprediction in summer, underprediction in winter). Possible causes:
+  - Seasonal bias in PET estimation (e.g., overestimating summer ET).
+  - Missing snow dynamics (if TT and DDF are poorly constrained).
+  - Seasonal human influences (irrigation, reservoir operations).
+  
+- **Drift or trend**: Residuals trending upward or downward over time. May indicate:
+  - Non-stationarity in catchment behavior (land use change, climate trends).
+  - Model warm-up issues (initial conditions not equilibrated).
+
+**Autocorrelation Function (ACF)**
+
+```r
+acf(residuals, main="Autocorrelation of Residuals", lag.max = 30)
+```
+
+**Interpretation:**
+
+- **No significant lags beyond lag 0**: Residuals are approximately independent—homoscedastic Gaussian assumption is reasonable.
+- **Significant ACF at lag 1 or higher** (bars exceeding blue dashed confidence bands): Residuals are temporally correlated. The model is not capturing all persistence in the system.
+  - **Action**: Include AR(1) residuals in the likelihood (Section 5.3), or add missing process memory (e.g., deeper groundwater store, multi-store routing).
+
+**Partial Autocorrelation Function (PACF)**
+
+```r
+pacf(residuals, main="Partial Autocorrelation of Residuals", lag.max = 30)
+```
+
+PACF shows direct correlation at each lag, controlling for shorter lags. If PACF is significant only at lag 1, an AR(1) model is appropriate. If multiple lags are significant, consider higher-order AR models.
+
+**Ljung-Box Test**
+
+Formal test for autocorrelation:
+
+```r
+Box.test(residuals, lag = 10, type = "Ljung-Box")
+```
+
+- **p-value < 0.05**: Significant autocorrelation detected. Reject the hypothesis of independent residuals.
+- **p-value ≥ 0.05**: No strong evidence of autocorrelation.
 
 ### 5.7.3 QQ Plot and Histogram
 
-```r
-qqnorm(residuals, pch=19, col="steelblue", main="QQ Plot of Residuals")
-qqline(residuals, col="red", lty=2)
+These assess normality of residuals.
 
-hist(residuals, breaks=20, col="lightblue", border="white",
-     main="Histogram of Residuals", xlab="Residuals")
+#### QQ Plot
+
+```r
+qqnorm(residuals, pch=19, col="steelblue", main="QQ Plot of Residuals", cex=0.7)
+qqline(residuals, col="red", lty=2, lwd=2)
 ```
 
-- **Heavy tails** → Student‑t likelihood.  
-- **Skewness** → consider transformation (e.g., log Q) or structural model changes.
+**Interpretation:**
+
+- **Points along the diagonal line**: Residuals follow a normal distribution—Gaussian likelihood is appropriate.
+- **Heavy upper tail** (points curve above line at right end): More extreme positive residuals than normal distribution predicts. Model underestimates large flows more severely than Gaussian errors allow.
+  - **Action**: Consider Student-t likelihood (robust to outliers) or heteroscedastic likelihood.
+  
+- **Heavy lower tail** (points curve below line at left end): More extreme negative residuals. Model overestimates low flows more than expected.
+  
+- **S-shaped curve**: Skewed distribution. If upper tail is heavier, consider log-transformation or heteroscedastic errors. If lower tail is heavier, model may systematically overpredict in some regime.
+
+- **Systematic deviation from line**: Non-normal residuals. May indicate:
+  - Wrong likelihood family (not Gaussian).
+  - Structural model error producing systematic patterns.
+
+#### Histogram
+
+```r
+hist(residuals, breaks=30, col="lightblue", border="white", freq=FALSE,
+     main="Histogram of Residuals", xlab="Residuals (m3/s)")
+
+# Overlay normal distribution with mean=0, sd=empirical sd
+curve(dnorm(x, mean = 0, sd = sd(residuals)), add = TRUE, col = "red", lwd = 2)
+```
+
+**Interpretation:**
+
+- **Symmetric, bell-shaped**: Consistent with normality.
+- **Long tails**: Indicates outliers; Student-t may be better.
+- **Skewness**: Asymmetric distribution. Positive skew (long right tail) is common in hydrology (extreme floods). Log-transformation or heteroscedastic likelihood can help.
+- **Bimodal**: Two peaks suggest different error regimes (e.g., snowmelt vs. rainfall-dominated periods). Consider regime-specific calibration or mixture models.
+
+### Shapiro-Wilk Test for Normality
+
+```r
+shapiro.test(residuals)
+```
+
+- **p-value < 0.05**: Residuals significantly deviate from normality. Consider alternative likelihoods.
+- **p-value ≥ 0.05**: No strong evidence against normality.
+
+**Caution**: Shapiro-Wilk is sensitive to sample size. With thousands of data points, minor deviations from normality may be statistically significant but practically unimportant. Always combine formal tests with visual diagnostics.
+
+### 5.7.4 Residual Variance by Flow Regime
+
+Stratify residuals by flow magnitude to detect heteroscedasticity more explicitly:
+
+```r
+# Define flow regimes based on quantiles
+Q_quantiles <- quantile(Q_mean_pred, probs = c(0.33, 0.67), na.rm = TRUE)
+regime <- cut(Q_mean_pred, breaks = c(-Inf, Q_quantiles, Inf), 
+              labels = c("Low", "Medium", "High"))
+
+boxplot(residuals ~ regime, col = c("lightblue", "lightgreen", "lightcoral"),
+        xlab = "Flow Regime", ylab = "Residuals (m3/s)",
+        main = "Residual Variance by Flow Regime")
+abline(h = 0, col = "red", lty = 2, lwd = 2)
+```
+
+**Interpretation:**
+
+- **Similar box widths**: Variance is roughly constant across flow regimes—homoscedastic assumption holds.
+- **Widening boxes from low to high flows**: Clear heteroscedasticity. Adopt heteroscedastic or log-space likelihood.
+- **Median lines off-center**: Systematic bias in specific regimes. For example, median above zero in "High" regime means model underpredicts peaks.
+
+**Levene's Test for Homogeneity of Variance**
+
+```r
+library(car)
+leveneTest(residuals ~ regime)
+```
+
+- **p-value < 0.05**: Variance differs significantly across regimes. Heteroscedasticity present.
+- **p-value ≥ 0.05**: No strong evidence of variance differences.
+
+### 5.7.5 Seasonal Residual Analysis
+
+For snow-dominated or strongly seasonal catchments, examine residuals by month or season:
+
+```r
+# Assume time_index is available as Date or POSIXct
+month <- as.numeric(format(time_index, "%m"))
+
+boxplot(residuals ~ month, col = rainbow(12), 
+        xlab = "Month", ylab = "Residuals (m3/s)",
+        main = "Residual Distribution by Month", names = month.abb)
+abline(h = 0, col = "red", lty = 2, lwd = 2)
+```
+
+**Interpretation:**
+
+- **Consistent medians near zero across months**: No seasonal bias.
+- **Positive residuals in spring**: Model underpredicts snowmelt. Check TT and DDF; consider increasing DDF or adjusting TT.
+- **Negative residuals in summer**: Model overpredicts summer flows, possibly due to overestimated PET or underestimated ET efficiency.
+- **Varying box widths by season**: Seasonal heteroscedasticity. May require season-specific $\sigma$ or complex error models.
 
 ### Quantitative diagnostics to report
 
-- **NSE** and **KGE** computed on posterior predictive ensembles (report median and credible intervals).  
-- **Coverage** of predictive intervals (50%, 90%).  
-- **Autocorrelation** statistics (lag‑1 autocorrelation, Ljung‑Box test).
+A comprehensive residual diagnostic summary should include:
+
+1. **Mean residual** (should be near zero): $\bar{r} = \frac{1}{T}\sum_t r_t$
+2. **Standard deviation of residuals**: Compare to posterior mean of $\sigma$. If residual SD $\gg \hat{\sigma}$, model is overconfident.
+3. **NSE** and **KGE** computed on posterior predictive ensembles (report median and credible intervals).
+4. **Coverage** of predictive intervals (50%, 90%).
+5. **Autocorrelation** statistics:
+   - Lag-1 ACF value
+   - Ljung-Box test p-value
+6. **Normality tests**:
+   - Shapiro-Wilk p-value (with caution on large samples)
+   - QQ plot deviations (qualitative)
+7. **Heteroscedasticity tests**:
+   - Levene's test p-value
+   - Visual funnel pattern in residual vs. fitted plot
+
+Example summary table:
+
+| **Diagnostic** | **Value** | **Interpretation** |
+|---|---:|---|
+| Mean residual (m³/s) | -0.12 | Near-zero, minimal bias |
+| SD of residuals (m³/s) | 2.34 | Slightly higher than median $\hat{\sigma}$ (2.10) |
+| Lag-1 ACF | 0.28 | Moderate autocorrelation detected |
+| Ljung-Box p-value | 0.003 | Significant autocorrelation (p < 0.05) |
+| Shapiro-Wilk p-value | 0.08 | No strong deviation from normality |
+| Levene's test p-value | 0.02 | Significant heteroscedasticity (p < 0.05) |
+| 50% Coverage | 52% | Well-calibrated |
+| 90% Coverage | 86% | Slight undercoverage |
 
 ### Actionable responses to diagnostics
 
-- **Heteroscedasticity** → adopt heteroscedastic or log‑space likelihood.  
-- **Autocorrelation** → include AR(1) residuals or add process memory.  
-- **Poor extremes** → heavy‑tailed likelihood or regime‑specific calibration.  
-- **Strong parameter correlations** → reparameterize, fix parameters, or use informative priors.
+Based on residual diagnostics, take these corrective actions:
 
----
+- **Heteroscedasticity** (funnel pattern, Levene's test p < 0.05): 
+  - Adopt heteroscedastic Gaussian likelihood: $\sigma_t = \sigma_0 (1 + \alpha Q_{\text{sim},t})$
+  - Or use log-space likelihood: model $\log(Q)$ instead of $Q$
+  - Or use multiplicative errors: $Q_{\text{obs},t} = Q_{\text{sim},t} \cdot \exp(\epsilon_t)$ where $\epsilon_t \sim \mathcal{N}(0, \sigma^2)$
 
+- **Autocorrelation** (ACF significant, Ljung-Box p < 0.05):
+  - Include AR(1) residual structure: $r_t = \phi r_{t-1} + \varepsilon_t$
+  - Or add missing process memory (e.g., additional groundwater store, multi-timescale routing)
+  - Check if temporal aggregation (e.g., monthly instead of daily) reduces autocorrelation
 
----
+- **Poor extremes** (heavy tails in QQ plot, high flows poorly captured):
+  - Adopt Student-t likelihood with estimated degrees of freedom $\nu$
+  - Or use Box-Cox transformation to normalize residuals
+  - Or implement regime-specific calibration (separate parameters for flood vs. baseflow periods)
 
+- **Strong parameter correlations** (check pairwise posterior scatterplots):
+  - Reparameterize model (e.g., combine X1 and DDF into a composite "effective storage" parameter)
+  - Fix less identifiable parameters based on literature or regional studies
+  - Use informative priors to break degeneracies
 
+- **Seasonal bias** (residuals systematically positive/negative in certain months):
+  - Improve PET estimation (use alternative methods like Penman-Monteith instead of Oudin)
+  - Check snow module: TT and DDF may be season-dependent
+  - Investigate anthropogenic influences (irrigation, reservoir operations) and include them explicitly if data are available
 
+- **Systematic bias in flow regimes** (consistent over/underprediction at high or low flows):
+  - High flow bias: Check precipitation input quality, consider flood routing enhancements
+  - Low flow bias: Examine baseflow separation, adjust X3 priors, check for groundwater abstractions
+  - Consider dual-objective calibration (e.g., weight NSE for high flows and log-NSE for low flows)
+
+### Advanced Diagnostic: Recursive Residuals
+
+For detecting non-stationarity, compute recursive residuals (one-step-ahead prediction errors):
+
+```r
+# Placeholder concept: use rolling window to check if residual properties change over time
+window_size <- 365  # one year
+n_windows <- floor(length(residuals) / window_size)
+
+mean_by_window <- sapply(1:n_windows, function(i) {
+  idx <- ((i-1)*window_size + 1):(i*window_size)
+  mean(residuals[idx], na.rm = TRUE)
+})
+
+plot(1:n_windows, mean_by_window, type = "b", pch = 19, col = "purple",
+     xlab = "Year", ylab = "Mean Residual (m3/s)",
+     main = "Temporal Evolution of Mean Residual")
+abline(h = 0, col = "red", lty = 2)
+```
+
+**Interpretation:**
+- Drift in mean residuals over time suggests non-stationarity (climate change, land use change).
+- Action: Consider time-varying parameters or split calibration into sub-periods.
+
+### Residual Diagnostics in Model Selection
+
+Use residual diagnostics to compare alternative model structures or likelihood assumptions:
+
+1. Calibrate with homoscedastic Gaussian likelihood.
+2. Compute residual diagnostics.
+3. If diagnostics suggest heteroscedasticity, recalibrate with heteroscedastic likelihood.
+4. Compare:
+   - Posterior predictive coverage (should improve)
+   - Residual plots (funnel pattern should disappear)
+   - Information criteria (DIC, WAIC) if available
+
+Similarly, if autocorrelation is detected:
+
+1. Recalibrate with AR(1) likelihood.
+2. Check ACF of residuals from AR(1) model—should be white noise.
+3. Compare coverage and predictive performance.
+
+### Summary: Iterative Refinement
+
+Residual diagnostics are not a one-time check but part of an **iterative model development cycle**:
+
+1. **Calibrate** with simplest assumptions (homoscedastic Gaussian).
+2. **Diagnose** residuals to identify violations.
+3. **Refine** likelihood or model structure.
+4. **Re-calibrate** and re-diagnose.
+5. **Repeat** until residuals approximate i.i.d. Gaussian (or other assumed distribution).
+
+This process ensures that Bayesian inference is based on valid statistical foundations, leading to reliable parameter estimates and credible predictive intervals.
