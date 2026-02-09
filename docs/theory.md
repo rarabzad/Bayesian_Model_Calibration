@@ -3042,47 +3042,242 @@ Every component demonstrated here—prior specification, likelihood construction
 
 ---
 
-### Transferable Skills
+# 5. Bayesian Calibration of GR4J with Homoscedastic Gaussian Errors
 
-After completing this example, you can:
+This section introduces a **full Bayesian calibration workflow** for the **GR4J hydrological model**, assuming **homoscedastic Gaussian residuals**. The aim is to estimate model parameters while **quantifying uncertainty** in both the hydrological model and observational errors.
 
-✓ Specify Bayesian models (prior + likelihood → posterior)
-✓ Implement log-probability functions for MCMC sampling  
-✓ Run adaptive MCMC algorithms and tune parameters
-✓ Diagnose convergence and assess sample quality
-✓ Compute posterior summaries and credible intervals
-✓ Visualize joint posteriors and parameter correlations
-✓ Perform posterior predictive checks
-✓ Interpret residual diagnostics and identify model deficiencies
-✓ Propagate uncertainty into predictions
-✓ Communicate Bayesian results to stakeholders
+Bayesian calibration allows us to combine **prior knowledge about parameters** with **observed streamflow data** to obtain a **posterior distribution** representing updated knowledge about parameter values.
+
+In this example, we calibrate **nine parameters**: six GR4J hydrological parameters and one residual standard deviation, assuming **constant variance** and **independence of errors**.
 
 ---
 
-### Next Steps
+## 5.1 Model Parameters and Bounds
 
-This linear regression example serves as a conceptual stepping stone toward complex Bayesian hydrologic models. The natural progression is:
+Before performing Bayesian calibration, we need to **define the parameters** and their **physically plausible ranges**:
 
-**Immediate extensions**:
-- Multiple regression (multiple predictors)
-- Polynomial regression (nonlinear relationships)
-- Heteroscedastic error models (Section 3.5)
-- Autocorrelated error models (Section 3.5)
+```r
+# Hydrologic parameter bounds
+lb_hydro <- c(1e-3, -3, 1e-3, 0.1, -20, 1e-3)
+ub_hydro <- c(1000, 3, 500, 10, 10, 10)
 
-**Hydrologic applications**:
-- Conceptual rainfall-runoff models (GR4J, HBV, Sacramento)
-- Physically-based models (SWAT, VIC, PRMS)
-- Snow accumulation and melt models
-- Groundwater models (MODFLOW with parameter uncertainty)
-- Integrated surface-subsurface models
+# Residual parameter bounds (sigma)
+lb_resid <- c(1e-3)  # sigma must be > 0
+ub_resid <- c(20)
 
-**Advanced topics**:
-- Hierarchical Bayesian models for regional calibration
-- Model structure uncertainty and model averaging
-- Sequential data assimilation and real-time updating
-- Multi-objective calibration with multiple data types
-- Sensitivity analysis and identifiability diagnostics
+# Combined parameter bounds
+lb <- c(lb_hydro, lb_resid)
+ub <- c(ub_hydro, ub_resid)
+```
 
-The methodological framework remains constant—only model complexity increases. With solid understanding of Bayesian linear regression, you are well-prepared to tackle sophisticated hydrologic calibration challenges.
+* Bounds prevent the MCMC from exploring **non-physical or extreme parameter values**.
+* Sigma, representing the standard deviation of residuals, is constrained to be positive.
+* Proper bounds ensure **efficient MCMC convergence** by limiting the parameter space.
 
 ---
+
+## 5.2 Log-Prior Function
+
+We use **uniform priors** to express non-informative prior knowledge:
+
+[
+p(\theta) = \begin{cases}
+\frac{1}{\text{range}} & \text{if } \theta \in [\text{lb}, \text{ub}] \
+0 & \text{otherwise}
+\end{cases}
+]
+
+```r
+log_prior <- function(theta, lb, ub) {
+  if (any(theta < lb) || any(theta > ub)) {
+    return(-Inf)
+  } else {
+    return(sum(dunif(theta, lb, ub, log = T)))  # uniform prior inside bounds
+  }
+}
+```
+
+* **Uniform priors** assume all values in the allowed range are equally likely.
+* Returns `-Inf` for out-of-bounds values, which **rejects invalid proposals** during MCMC.
+* In hydrology, uniform priors are often appropriate when **strong prior information is unavailable**, yet bounds encode physical constraints.
+
+---
+
+## 5.3 Likelihood Function
+
+We assume **Gaussian, homoscedastic, non-autocorrelated residuals**:
+
+[
+Q_{\text{obs}, t} \sim \mathcal{N}(Q_{\text{sim}, t}(\theta), \sigma^2)
+]
+
+```r
+log_likelihood <- function(theta, P_xts, T_xts, PET_xts = NULL, area_km2, Q_obs) {
+  hydro_params <- theta[1:6]
+  sigma <- theta[7]
+
+  Q_sim <- gr4j_sim(
+    P_xts = P_xts,
+    T_xts = T_xts,
+    PET_xts = PET_xts,
+    params = hydro_params,
+    area_km2 = area_km2,
+    return_states = FALSE
+  )
+
+  ll <- sum(dnorm(Q_obs, mean = Q_sim, sd = sigma, log = TRUE))
+  return(ll)
+}
+```
+
+* The likelihood evaluates **how well simulated flows reproduce observations** given parameter values.
+* Homoscedastic assumption simplifies computation but may underestimate uncertainty during **extreme flows**.
+* Gaussian likelihood is a **common choice in hydrology** because it aligns with measurement error assumptions.
+
+---
+
+## 5.4 Log-Posterior Function
+
+The posterior combines prior knowledge with observed data:
+
+[
+\log p(\theta \mid Q_{\text{obs}}) = \log p(Q_{\text{obs}} \mid \theta) + \log p(\theta)
+]
+
+```r
+log_posterior <- function(theta, lb, ub, P_xts, T_xts, PET_xts, area_km2, Q_obs) {
+  lp <- log_prior(theta, lb, ub)
+  if (is.infinite(lp)) return(lp)
+  ll <- log_likelihood(theta, P_xts, T_xts, PET_xts, area_km2, Q_obs)
+  return(lp + ll)
+}
+```
+
+* Posterior is **the target distribution** for MCMC sampling.
+* Invalid parameter proposals are **immediately rejected** by the prior.
+* This combination ensures that parameter estimation is **constrained by both data and physical knowledge**.
+
+---
+
+## 5.5 MCMC Sampling
+
+We use **adaptive Metropolis-Hastings** to generate posterior samples:
+
+```r
+library(adaptMCMC)
+theta_init <- c(rep(1,6), 1)  # initial values
+
+mcmc_result <- MCMC(
+  p = log_posterior,
+  init = theta_init,
+  n = 10000,
+  adapt = TRUE,
+  acc.rate = 0.234,
+  scale = rep(0.5, 7),
+  lb = lb,
+  ub = ub,
+  P_xts = P_xts,
+  T_xts = T_xts,
+  PET_xts = PET_xts,
+  area_km2 = area_km2,
+  Q_obs = Q_obs
+)
+
+burn_in <- 2000
+samples <- mcmc_result$samples[(burn_in+1):nrow(mcmc_result$samples), ]
+colnames(samples) <- c("X1","X2","X3","X4","X5","X6","sigma")
+```
+
+* Adaptive MCMC **automatically tunes the proposal distribution** to achieve an appropriate acceptance rate.
+* The burn-in period discards **initial, non-converged samples**.
+* Posterior samples quantify **uncertainty in hydrologic parameters and residual variance**.
+
+---
+
+## 5.6 Posterior Predictive Checks (PPCs)
+
+PPCs evaluate whether posterior samples reproduce observed flows:
+
+```r
+n_pred <- 100
+pred_indices <- sample(1:nrow(samples), n_pred)
+time_steps <- 1:length(Q_obs)
+Q_pred_samples <- matrix(NA, nrow = n_pred, ncol = length(Q_obs))
+
+for (i in 1:n_pred) {
+  idx <- pred_indices[i]
+  hydro_params <- samples[idx, 1:6]
+  sigma <- samples[idx, 7]
+
+  Q_sim <- gr4j_sim(P_xts, T_xts, PET_xts, hydro_params, area_km2)
+  Q_pred_samples[i, ] <- rnorm(length(Q_sim), mean = Q_sim, sd = sigma)
+}
+
+Q_mean_pred <- colMeans(Q_pred_samples)
+
+# Plot PPC
+plot(time_steps, Q_obs, type = "n", xlab="Time step", ylab="Flow [m³/s]",
+     main="Posterior Predictive Check")
+for (i in 1:n_pred) lines(time_steps, Q_pred_samples[i, ], col=rgb(0,0,0,0.05))
+points(time_steps, Q_obs, col="red", pch=19)
+lines(time_steps, Q_mean_pred, col="blue", lwd=2)
+legend("topright", legend=c("Observed","Posterior mean","Posterior samples"),
+       col=c("red","blue",rgb(0,0,0,0.3)), pch=c(19,NA,NA), lty=c(NA,1,1), lwd=c(NA,2,1))
+```
+* Each thin line represents a **flow realization from a posterior sample**, showing predictive uncertainty.
+* Observed flows falling within the cloud suggest **good calibration**.
+* Posterior mean (blue line) provides a **central estimate** of predicted flows.
+
+---
+
+## 5.7 Residual Diagnostics
+
+Residuals measure **deviation between observed and predicted flows**:
+
+```r
+residuals <- Q_obs - Q_mean_pred
+```
+
+### 5.7.1 Residual vs Fitted
+
+```r
+plot(Q_mean_pred, residuals, pch=19, col="steelblue",
+     xlab="Posterior mean prediction", ylab="Residuals",
+     main="Residuals vs Posterior Mean Prediction")
+abline(h=0, col="red", lty=2)
+```
+
+* Residuals should be **centered around zero**.
+* A funnel pattern indicates **heteroscedasticity**, suggesting variance increases with flow magnitude.
+
+### 5.7.2 Residual vs Time and Autocorrelation
+
+```r
+plot(1:length(residuals), residuals, type="b", pch=19, col="darkgreen",
+     xlab="Time step", ylab="Residuals", main="Residuals vs Time")
+abline(h=0, col="red", lty=2)
+
+acf(residuals, main="Autocorrelation of Residuals")
+```
+
+* **No temporal trend** → model captures dynamics well.
+* Significant autocorrelation indicates **missing temporal structure**, which could be addressed by an AR(1) residual model.
+
+### 5.7.3 QQ Plot and Histogram
+
+```r
+qqnorm(residuals, pch=19, col="steelblue", main="QQ Plot of Residuals")
+qqline(residuals, col="red", lty=2)
+
+hist(residuals, breaks=20, col="lightblue", border="white",
+     main="Histogram of Residuals", xlab="Residuals")
+```
+* QQ plot checks **normality assumption**.
+* Histogram visually confirms **residual distribution**.
+* Deviations from Gaussian assumptions may indicate need for **transformations** or alternative likelihoods.
+
+
+---
+
+
+
