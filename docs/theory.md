@@ -3363,6 +3363,7 @@ $$\log L(\theta) = \sum_{t=1}^T \left[ -\frac{1}{2}\log(2\pi\sigma^2) - \frac{(Q
 **R implementation (homoscedastic)**
 
 ```r
+source("https://raw.githubusercontent.com/rarabzad/Bayesian_Model_Calibration/refs/heads/main/docs/gr4j_sim.R") # loading GR4J simulator
 log_likelihood_homo <- function(theta, P_xts, T_xts, PET_xts = NULL,
                                 area_km2, Q_obs_xts) {
   hydro_params <- theta[1:6]
