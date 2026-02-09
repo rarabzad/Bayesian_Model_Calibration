@@ -52,6 +52,17 @@
   * [4.8 Posterior Predictive Checks](#48-posterior-predictive-checks)
   * [4.9 Residual Analysis](#49-residual-analysis)
   * [4.10 Summary and Learning Outcomes](#410-summary-and-learning-outcomes)
+* [5. Bayesian Calibration of GR4J with Homoscedastic Gaussian Errors](#5-bayesian-calibration-of-gr4j-with-homoscedastic-gaussian-errors)
+  * [5.1 Model Parameters and Bounds](#51-model-parameters-and-bounds)
+  * [5.2 Log-Prior Function](#52-log-prior-function)
+  * [5.3 Likelihood Function](#53-likelihood-function)
+  * [5.4 Log-Posterior Function](#54-log-posterior-function)
+  * [5.5 MCMC Sampling](#55-mcmc-sampling)
+  * [5.6 Posterior Predictive Checks](#56-posterior-predictive-checks)
+  * [5.7 Residual Diagnostics](#57-residual-diagnostics)
+    * [5.7.1 Residuals vs Posterior Mean Prediction](#571-residuals-vs-posterior-mean-prediction)
+    * [5.7.2 Residuals vs Time and Autocorrelation](#572-residuals-vs-time-and-autocorrelation)
+    * [5.7.3 QQ Plot and Histogram](#573-qq-plot-and-histogram)
 ---
 
 # 1. Introduction
