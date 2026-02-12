@@ -74,13 +74,13 @@
     * [Default: Homoscedastic Gaussian](#default-homoscedastic-gaussian)
     * [Likelihood alternatives](#likelihood-alternatives)
     * [Likelihood selection checklist](#likelihood-selection-checklist)
-  * [5.4 Log‑Posterior Function](#54-logposterior-function)
+  * [5.5 Log‑Posterior Function](#54-logposterior-function)
     * [Scientific considerations](#scientific-considerations)
-  * [5.5 MCMC Sampling](#55-mcmc-sampling)
+  * [5.6 MCMC Sampling](#55-mcmc-sampling)
     * [Example using adaptMCMC](#example-using-adaptmcmc)
     * [MCMC best practices](#mcmc-best-practices)
     * [Computational tips](#computational-tips)
-  * [5.6 Posterior Predictive Checks (PPCs)](#56-posterior-predictive-checks-ppcs)
+  * [5.7 Posterior Predictive Checks (PPCs)](#56-posterior-predictive-checks-ppcs)
     * [Theoretical Foundation](#theoretical-foundation)
     * [Procedure](#procedure)
     * [R code (ensemble PPC)](#r-code-ensemble-ppc)
@@ -97,16 +97,16 @@
     * [Advanced PPC: Test Statistics](#advanced-ppc-test-statistics)
     * [Reporting PPC Results](#reporting-ppc-results)
     * [When PPCs Fail: Next Steps](#when-ppcs-fail-next-steps)
-  * [5.7 Residual Diagnostics](#57-residual-diagnostics)
+  * [5.8 Residual Diagnostics](#57-residual-diagnostics)
     * [Residual definition](#residual-definition)
-    * [5.7.1 Residual vs Fitted](#571-residual-vs-fitted)
-    * [5.7.2 Residual vs Time and Autocorrelation](#572-residual-vs-time-and-autocorrelation)
-    * [5.7.3 QQ Plot and Histogram](#573-qq-plot-and-histogram)
+    * [5.8.1 Residual vs Fitted](#571-residual-vs-fitted)
+    * [5.8.2 Residual vs Time and Autocorrelation](#572-residual-vs-time-and-autocorrelation)
+    * [5.8.3 QQ Plot and Histogram](#573-qq-plot-and-histogram)
       * [QQ Plot](#qq-plot)
       * [Histogram](#histogram)
     * [Shapiro-Wilk Test for Normality](#shapiro-wilk-test-for-normality)
-    * [5.7.4 Residual Variance by Flow Regime](#574-residual-variance-by-flow-regime)
-    * [5.7.5 Seasonal Residual Analysis](#575-seasonal-residual-analysis)
+    * [5.8.4 Residual Variance by Flow Regime](#574-residual-variance-by-flow-regime)
+    * [5.8.5 Seasonal Residual Analysis](#575-seasonal-residual-analysis)
     * [Quantitative diagnostics to report](#quantitative-diagnostics-to-report)
     * [Actionable responses to diagnostics](#actionable-responses-to-diagnostics)
     * [Advanced Diagnostic: Recursive Residuals](#advanced-diagnostic-recursive-residuals)
@@ -152,6 +152,8 @@ Traditional hydrologic calibration methods typically rely on optimization techni
 Although widely used, deterministic calibration methods suffer from important conceptual limitations. Hydrologic systems commonly exhibit a phenomenon known as **equifinality**, where multiple parameter combinations produce similar simulation performance. Deterministic calibration approaches ignore this multiplicity of acceptable solutions by selecting only one parameter set, thereby underrepresenting uncertainty in model predictions.
 
 Another limitation of deterministic calibration is the inability to incorporate prior scientific knowledge in a formal and quantitative manner. Although modelers may restrict parameter ranges manually, traditional calibration methods lack a coherent framework for integrating prior information with observational data.
+
+![MCMC vs Optimization](https://raw.githubusercontent.com/rarabzad/Bayesian_Model_Calibration/main/docs/mcmc_vs_optimization.gif)
 
 ---
 
@@ -3325,7 +3327,7 @@ $$
 **R implementation**
 
 ```r
-log_prior <- function(theta, lb, ub) {
+log_prior <- function(theta) {
   if (any(theta < lb) || any(theta > ub)) return(-Inf)
   return(sum(dunif(theta, lb, ub, log = TRUE)))
 }
@@ -3364,75 +3366,121 @@ $$\log L(\theta) = \sum_{t=1}^T \left[ -\frac{1}{2}\log(2\pi\sigma^2) - \frac{(Q
 
 ```r
 source("https://raw.githubusercontent.com/rarabzad/Bayesian_Model_Calibration/refs/heads/main/docs/gr4j_sim.R") # loading GR4J simulator
-log_likelihood_homo <- function(theta, P_xts, T_xts, PET_xts = NULL,
-                                area_km2, Q_obs_xts) {
+log_likelihood_homo <- function(theta)
+{
   hydro_params <- theta[1:6]
   sigma <- theta[7]
   if (sigma <= 0) return(-Inf)
-
   Q_sim_xts <- gr4j_sim(P_xts, T_xts, PET_xts, hydro_params, area_km2)
   merged <- merge(Q_sim_xts, Q_obs_xts, all = FALSE)
+  merged<-merged[!apply(is.na(merged),1,any),]
   Q_sim <- as.numeric(merged[,1]); Q_obs <- as.numeric(merged[,2])
   if (length(Q_obs) == 0) return(-Inf)
-
   ll <- sum(dnorm(Q_obs, mean = Q_sim, sd = sigma, log = TRUE))
   return(ll)
 }
 ```
 
-### Likelihood alternatives
+---
 
-**Heteroscedastic Gaussian** — variance grows with flow:
+## 5.4 Heteroscedastic and Autocorrelated Gaussian Likelihood
 
-$$\sigma_t = \sigma_0 (1 + \alpha Q_{\text{sim},t})$$
+Real hydrologic residuals often **violate homoscedasticity and independence assumptions**. Observed errors are flow-dependent and temporally correlated. To address this, we combine:
 
-**AR(1) residuals** — temporal correlation:
+1. **Flow-dependent (heteroscedastic) residual variance**
+2. **AR(1) autocorrelation** in standardized residuals
+3. **Jacobian adjustment** for the standardization transformation
 
-$$r_t = Q_{\text{obs},t} - Q_{\text{sim},t},\quad r_t = \phi r_{t-1} + \varepsilon_t,\quad \varepsilon_t\sim\mathcal{N}(0,\sigma^2)$$
+![Descriptive alt text](https://ars.els-cdn.com/content/image/1-s2.0-S0022169424011338-gr2.jpg)
 
-**Student‑t** — robust to outliers; parameterized by degrees of freedom $\nu$.
+---
 
-**Log‑space likelihood** — model $\log Q$ when multiplicative errors dominate.
+### 5.4.1 Model Formulation
 
-**R examples (heteroscedastic and AR(1))**
+**Heteroscedastic variance** — standard deviation grows linearly with simulated flow:
+$$
+\sigma_{\varepsilon(t)} = a \cdot \hat{Q}_t + b
+$$
+where $a$ scales error with flow magnitude and $b$ is the baseline standard deviation.
+
+**Raw and standardized residuals:**
+$$
+\varepsilon_t = Q_t^{\text{obs}} - \hat{Q}_t, \quad \eta_t = \frac{\varepsilon_t}{\sigma_{\varepsilon(t)}}
+$$
+
+**AR(1) process on standardized residuals** — captures temporal correlation:
+$$
+\eta_1 \sim \mathcal{N}\left(0, \frac{1}{1 - \phi^2}\right), \quad \eta_t \mid \eta_{t-1} \sim \mathcal{N}(\phi \, \eta_{t-1}, 1), \quad t = 2, \dots, T
+$$
+where $\phi$ is the autocorrelation coefficient and innovation variance is 1 due to standardization.
+
+---
+
+### 5.4.2 Log-Likelihood Function
+
+The complete log-likelihood for the heteroscedastic AR(1) error model is:
+
+$$
+\begin{align}
+\log p(D \mid \theta, a, b, \phi) = &-\frac{1}{2} \log \left( \frac{2\pi}{1 - \phi^2} \right) - \frac{\eta_1^2 (1 - \phi^2)}{2} \\
+&- \frac{T-1}{2} \log(2\pi) - \frac{1}{2} \sum_{t=2}^{T} (\eta_t - \phi \, \eta_{t-1})^2 \\
+&- \sum_{t=1}^{T} \log(\sigma_{\varepsilon(t)})
+\end{align}
+$$
+
+where:
+- The first line accounts for the initial AR(1) condition
+- The second line sums innovations for $t = 2, \dots, T$
+- The third line is the **Jacobian adjustment** for standardization
+
+---
+
+### 5.4.3 R Implementation
 
 ```r
-# Heteroscedastic example (alpha fixed or estimated)
-log_likelihood_hetero <- function(theta, P_xts, T_xts, PET_xts = NULL,
-                                  area_km2, Q_obs_xts, alpha = 0.01) {
+# Combined heteroscedastic + AR(1) likelihood
+log_likelihood_hetero_ar1 <- function(theta)
+{
   hydro_params <- theta[1:6]
-  sigma0 <- theta[7]
-  if (sigma0 <= 0) return(-Inf)
-
+  a <- theta[7]      # heteroscedastic slope
+  b <- theta[8]      # baseline std dev
+  phi <- theta[9]    # AR(1) coefficient
+  
+  # Parameter constraints
+  if (a < 0 || b <= 0 || abs(phi) >= 1) return(-Inf)
+  
+  # Simulate flow
   Q_sim_xts <- gr4j_sim(P_xts, T_xts, PET_xts, hydro_params, area_km2)
   merged <- merge(Q_sim_xts, Q_obs_xts, all = FALSE)
-  Q_sim <- as.numeric(merged[,1]); Q_obs <- as.numeric(merged[,2])
-
-  sd_t <- pmax(1e-6, sigma0 * (1 + alpha * Q_sim))
-  ll <- sum(dnorm(Q_obs, mean = Q_sim, sd = sd_t, log = TRUE))
-  return(ll)
-}
-
-# AR(1) residuals example (phi included in theta as theta[8])
-log_likelihood_ar1 <- function(theta, P_xts, T_xts, PET_xts = NULL,
-                               area_km2, Q_obs_xts) {
-  hydro_params <- theta[1:6]
-  sigma <- theta[7]
-  phi <- theta[8]
-  if (sigma <= 0 || abs(phi) >= 1) return(-Inf)
-
-  Q_sim_xts <- gr4j_sim(P_xts, T_xts, PET_xts, hydro_params, area_km2)
-  merged <- merge(Q_sim_xts, Q_obs_xts, all = FALSE)
-  Q_sim <- as.numeric(merged[,1]); Q_obs <- as.numeric(merged[,2])
+  Q_sim <- as.numeric(merged[,1])
+  Q_obs <- as.numeric(merged[,2])
+  
+  # Flow-dependent standard deviation
+  sigma_t <- pmax(1e-6, a * Q_sim + b)
+  
+  # Standardized residuals
   res <- Q_obs - Q_sim
-  ll <- dnorm(res[1], mean = 0, sd = sigma / sqrt(1 - phi^2), log = TRUE)
-  for (t in 2:length(res)) {
-    mu_t <- phi * res[t-1]
-    ll <- ll + dnorm(res[t], mean = mu_t, sd = sigma, log = TRUE)
+  eta <- res / sigma_t
+  
+  # Log-likelihood
+  # Initial condition
+  ll <- dnorm(eta[1], mean = 0, sd = 1 / sqrt(1 - phi^2), log = TRUE)
+  
+  # AR(1) innovations (t = 2...T)
+  for (t in 2:length(eta)) {
+    ll <- ll + dnorm(eta[t], mean = phi * eta[t-1], sd = 1, log = TRUE)
   }
+  
+  # Jacobian adjustment
+  ll <- ll - sum(log(sigma_t))
+  
   return(ll)
 }
 ```
+
+**Alternative likelihood formulations:**
+- **Student-t errors** — replace `dnorm` with `dt(..., df = nu)` for robustness to outliers
+- **Log-space likelihood** — model $\log Q$ when multiplicative errors dominate: `log(Q_obs) ~ N(log(Q_sim), sigma^2)`
 
 ### Likelihood selection checklist
 
@@ -3444,7 +3492,7 @@ log_likelihood_ar1 <- function(theta, P_xts, T_xts, PET_xts = NULL,
 
 ---
 
-## 5.4 Log‑Posterior Function
+## 5.5 Log‑Posterior Function
 
 **Definition.** The log‑posterior is the sum of the log‑prior and the log‑likelihood:
 
@@ -3453,11 +3501,11 @@ $$\log p(\theta \mid Q_{\text{obs}}) = \log L(\theta) + \log p(\theta)$$
 **R wrapper (pluggable likelihood)**
 
 ```r
-log_posterior <- function(theta, lb, ub, P_xts, T_xts, PET_xts,
-                          area_km2, Q_obs_xts, likelihood_fn) {
-  lp <- log_prior(theta, lb, ub)
+log_posterior <- function(theta)
+{
+  lp <- log_prior(theta)
   if (is.infinite(lp)) return(-Inf)
-  ll <- likelihood_fn(theta, P_xts, T_xts, PET_xts, area_km2, Q_obs_xts)
+  ll <- log_likelihood_homo(theta)
   return(lp + ll)
 }
 ```
@@ -3470,35 +3518,66 @@ log_posterior <- function(theta, lb, ub, P_xts, T_xts, PET_xts,
 
 ---
 
-## 5.5 MCMC Sampling
+## 5.6 MCMC Sampling
 
 **Sampler selection.** Adaptive Metropolis (e.g., `adaptMCMC`) is a practical default for moderate dimensionality. For complex posteriors, consider DE‑MCMC or Hamiltonian Monte Carlo (`rstan`, `cmdstanr`).
 
 ### Example using `adaptMCMC`
 
 ```r
+library(xts)
+library(zoo)
 library(adaptMCMC)
+library(airGR)
+library(pso)
 
-# initial values: X1,X2,X3,X4,TT,DDF,sigma
+data(L0123001)
+P_xts    <- xts(BasinObs$P,       order.by = as.Date(BasinObs$DatesR))
+PET_xts  <- xts(BasinObs$E,       order.by = as.Date(BasinObs$DatesR))
+T_xts    <- xts(BasinObs$T,       order.by = as.Date(BasinObs$DatesR))
+Q_obs_xts    <- xts(BasinObs$Qls/1000, order.by = as.Date(BasinObs$DatesR))
+area_km2 <- BasinInfo$BasinArea
+lb_hydro  <- c(1e-3, -3, 1e-3, 0.1, -20, 1e-3)      # 6 hydro params
+ub_hydro  <- c(1000,  3, 500, 10, 10, 10)
+lb_resid  <- c(1e-3)                          # sigma
+ub_resid  <- c(20)
+lb <- c(lb_hydro, lb_resid)                          # total 7 parameters
+ub <- c(ub_hydro, ub_resid)
+
+
+# --- Parameter scales proportional to ranges ---
+scale_init <- (ub - lb) * 0.02        # 2% of parameter range
+scale_init[scale_init <= 0] <- 0.1   # ensure non-zero
+
+# --- Initial parameters ---
 theta_init <- c(500, 0.5, 200, 5, 0, 3, 1)
 
-# scale initialization proportional to parameter ranges
-scale_init <- (ub - lb) * 0.02
-scale_init[scale_init <= 0] <- 0.1
+library(adaptMCMC)
 
-mcmc_result <- MCMC(
-  p = function(theta, ...) log_posterior(theta, lb, ub, ...,
-                                         likelihood_fn = log_likelihood_homo),
+# --- Step 2a: short burn-in to tune scales ---
+set.seed(20122023)
+burnin_result <- MCMC(
+  p = log_posterior,
   init = theta_init,
-  n = 30000,
-  adapt = TRUE,
-  acc.rate = 0.234,
   scale = scale_init,
-  P_xts = P_xts,
-  T_xts = T_xts,
-  PET_xts = PET_xts,
-  area_km2 = area_km2,
-  Q_obs_xts = Q_obs_xts
+  n = 2000,          # short tuning run
+  adapt = TRUE,
+  acc.rate = 0.5      # start with moderate acceptance to allow adaptation
+)
+
+# --- Step 2b: get tuned scales ---
+# tuned_scale <- sqrt(diag(burnin_result$cov.jump)) # when no cross correlation exists between parameters (which is highly likely)
+tuned_scale <- burnin_result$cov.jump
+
+# --- Step 2c: main MCMC with optimal acceptance ---
+set.seed(20122023)
+mcmc_result <- MCMC(
+  p = log_posterior,
+  init = theta_init,
+  scale = tuned_scale,
+  n = 10000,          # main sampling
+  adapt = TRUE,
+  acc.rate = 0.234    # target optimal acceptance
 )
 
 burn_in <- 5000
@@ -3522,7 +3601,7 @@ colnames(samples) <- c("X1","X2","X3","X4","TT","DDF","sigma")
 
 ---
 
-## 5.6 Posterior Predictive Checks (PPCs)
+## 5.7 Posterior Predictive Checks (PPCs)
 
 **Purpose.** Evaluate whether posterior samples reproduce observed flows and quantify predictive uncertainty.
 
@@ -3613,10 +3692,10 @@ polygon(c(time_index, rev(time_index)),
         col = rgb(0.5, 0.5, 0.5, 0.4), border = NA)
 
 # Posterior mean prediction
-lines(time_index, Q_mean_pred, col = "blue", lwd = 2)
+lines(time_index, Q_mean_pred, col = "blue", lwd = 1)
 
 # Observed data
-points(time_index, Q_obs, pch = 19, cex = 0.5, col = "black")
+points(time_index, Q_obs, pch = 19, cex = 0.2, col = "black")
 
 legend("topright", 
        c("Observed", "Posterior Mean", "50% Interval", "90% Interval"),
@@ -3663,8 +3742,7 @@ Q_obs_sorted <- sort(Q_obs, decreasing = TRUE)
 exceedance_prob <- seq_along(Q_obs_sorted) / length(Q_obs_sorted)
 
 # Compute FDCs for each predictive realization
-Q_pred_fdc <- apply(Q_pred_samples, 1, function(x) sort(x, decreasing = TRUE))
-
+Q_pred_fdc <- apply(Q_pred_samples, 1, function(x) quantile(x, probs = 1-exceedance_prob))
 # Plot observed FDC
 plot(exceedance_prob, Q_obs_sorted, type = "l", lwd = 3, col = "black",
      log = "y", xlab = "Exceedance Probability", ylab = "Discharge (m3/s)",
@@ -3749,7 +3827,7 @@ Q_obs_max <- max(Q_obs, na.rm = TRUE)
 Q_pred_max <- apply(Q_pred_samples, 1, max, na.rm = TRUE)
 
 hist(Q_pred_max, breaks = 30, col = "lightblue", border = "white",
-     xlab = "Maximum Discharge (m3/s)", main = "Predictive Distribution of Peak Flow")
+     xlab = "Maximum Discharge (m3/s)", main = "Predictive Distribution of Peak Flow",xlim=pretty(c(range(Q_pred_max),Q_obs_max),1))
 abline(v = Q_obs_max, col = "red", lwd = 3, lty = 2)
 legend("topright", "Observed Max", col = "red", lwd = 3, lty = 2)
 
@@ -3795,7 +3873,8 @@ where $r$ is correlation, $\alpha = \frac{\sigma_{\text{sim}}}{\sigma_{\text{obs
 ```r
 KGE_ensemble <- numeric(n_pred)
 
-for (i in 1:n_pred) {
+for (i in 1:n_pred)
+{
   Q_sim_i <- Q_pred_samples[i, ]
   r <- cor(Q_obs, Q_sim_i, use = "complete.obs")
   alpha <- sd(Q_sim_i, na.rm = TRUE) / sd(Q_obs, na.rm = TRUE)
@@ -3842,11 +3921,11 @@ Instead of raw time series, compute summary statistics on observed vs. predictiv
 
 ```r
 # Compute test statistic: lag-1 autocorrelation
-acf_obs <- acf(Q_obs, lag.max = 1, plot = FALSE)$acf[2]
+acf_obs <- acf(Q_obs, lag.max = 1, plot = FALSE, na.action = na.pass)$acf[2]
 acf_pred <- apply(Q_pred_samples, 1, function(x) acf(x, lag.max = 1, plot = FALSE)$acf[2])
 
 hist(acf_pred, breaks = 30, col = "lightblue", border = "white",
-     xlab = "Lag-1 Autocorrelation", main = "PPC: Autocorrelation Structure")
+     xlab = "Lag-1 Autocorrelation", main = "PPC: Autocorrelation Structure",xlim=range(c(range(acf_pred),acf_obs)))
 abline(v = acf_obs, col = "red", lwd = 3, lty = 2)
 legend("topright", "Observed ACF(1)", col = "red", lwd = 3, lty = 2)
 
@@ -3871,17 +3950,6 @@ A comprehensive PPC report should include:
 6. **Seasonal subset** PPCs if relevant.
 7. **Test statistics** (autocorrelation, variance, skewness) if model assumptions are questionable.
 
-Example summary table:
-
-| **Metric** | **Observed** | **Predictive Median** | **Predictive 90% CI** |
-|---|---:|---:|---:|
-| Mean Q (m³/s) | 15.2 | 15.1 | [14.5, 15.8] |
-| Max Q (m³/s) | 89.3 | 85.7 | [72.1, 102.4] |
-| 50% Coverage | — | 52% | — |
-| 90% Coverage | — | 88% | — |
-| NSE | — | 0.78 | [0.72, 0.83] |
-| KGE | — | 0.81 | [0.76, 0.85] |
-
 ### When PPCs Fail: Next Steps
 
 If PPCs reveal systematic deficiencies:
@@ -3894,7 +3962,7 @@ If PPCs reveal systematic deficiencies:
 
 ---
 
-## 5.7 Residual Diagnostics
+## 5.8 Residual Diagnostics
 
 **Purpose.** Validate likelihood assumptions and guide model or likelihood refinement.
 
@@ -3918,7 +3986,7 @@ residuals <- as.numeric(merged_obs[,2]) - Q_mean_pred
 
 Note: For heteroscedastic or AR(1) likelihoods, compute **standardized residuals** to account for varying variances or temporal structure.
 
-### 5.7.1 Residual vs Fitted
+### 5.8.1 Residual vs Fitted
 
 This plot reveals heteroscedasticity (variance changing with discharge magnitude).
 
@@ -3951,7 +4019,7 @@ lines(sort(Q_mean_pred), predict(loess_fit, sort(Q_mean_pred)),
   - Anthropogenic influences (dam releases, abstractions)?
   - Rating curve errors at extreme stages?
 
-### 5.7.2 Residual vs Time and Autocorrelation
+### 5.8.2 Residual vs Time and Autocorrelation
 
 Temporal plots reveal trends, seasonality, and autocorrelation.
 
@@ -3960,10 +4028,6 @@ Temporal plots reveal trends, seasonality, and autocorrelation.
 plot(1:length(residuals), residuals, type="b", pch=19, col="darkgreen", cex=0.5,
      xlab="Time step", ylab="Residuals (m3/s)", main="Residuals vs Time")
 abline(h=0, col="red", lty=2, lwd=2)
-
-# Add seasonal loess smoother
-loess_time <- loess(residuals ~ seq_along(residuals), span = 0.1)
-lines(seq_along(residuals), predict(loess_time), col = "blue", lwd = 2)
 ```
 
 **Interpretation:**
@@ -3981,7 +4045,7 @@ lines(seq_along(residuals), predict(loess_time), col = "blue", lwd = 2)
 **Autocorrelation Function (ACF)**
 
 ```r
-acf(residuals, main="Autocorrelation of Residuals", lag.max = 30)
+acf(residuals, main="Autocorrelation of Residuals", lag.max = 30, na.action = na.pass)
 ```
 
 **Interpretation:**
@@ -3993,7 +4057,7 @@ acf(residuals, main="Autocorrelation of Residuals", lag.max = 30)
 **Partial Autocorrelation Function (PACF)**
 
 ```r
-pacf(residuals, main="Partial Autocorrelation of Residuals", lag.max = 30)
+pacf(residuals, main="Partial Autocorrelation of Residuals", lag.max = 30, na.action = na.pass)
 ```
 
 PACF shows direct correlation at each lag, controlling for shorter lags. If PACF is significant only at lag 1, an AR(1) model is appropriate. If multiple lags are significant, consider higher-order AR models.
@@ -4009,7 +4073,7 @@ Box.test(residuals, lag = 10, type = "Ljung-Box")
 - **p-value < 0.05**: Significant autocorrelation detected. Reject the hypothesis of independent residuals.
 - **p-value ≥ 0.05**: No strong evidence of autocorrelation.
 
-### 5.7.3 QQ Plot and Histogram
+### 5.8.3 QQ Plot and Histogram
 
 These assess normality of residuals.
 
@@ -4094,7 +4158,7 @@ leveneTest(residuals ~ regime)
 - **p-value < 0.05**: Variance differs significantly across regimes. Heteroscedasticity present.
 - **p-value ≥ 0.05**: No strong evidence of variance differences.
 
-### 5.7.5 Seasonal Residual Analysis
+### 5.8.5 Seasonal Residual Analysis
 
 For snow-dominated or strongly seasonal catchments, examine residuals by month or season:
 
@@ -4186,7 +4250,7 @@ For detecting non-stationarity, compute recursive residuals (one-step-ahead pred
 
 ```r
 # Placeholder concept: use rolling window to check if residual properties change over time
-window_size <- 365  # one year
+window_size <- 120  # one season
 n_windows <- floor(length(residuals) / window_size)
 
 mean_by_window <- sapply(1:n_windows, function(i) {
@@ -4195,7 +4259,7 @@ mean_by_window <- sapply(1:n_windows, function(i) {
 })
 
 plot(1:n_windows, mean_by_window, type = "b", pch = 19, col = "purple",
-     xlab = "Year", ylab = "Mean Residual (m3/s)",
+     xlab = "Season", ylab = "Mean Residual (m3/s)",
      main = "Temporal Evolution of Mean Residual")
 abline(h = 0, col = "red", lty = 2)
 ```
@@ -4232,4 +4296,448 @@ Residual diagnostics are not a one-time check but part of an **iterative model d
 4. **Re-calibrate** and re-diagnose.
 5. **Repeat** until residuals approximate i.i.d. Gaussian (or other assumed distribution).
 
-This process ensures that Bayesian inference is based on valid statistical foundations, leading to reliable parameter estimates and credible predictive intervals.
+
+# 6. Complete Workflows
+## 6.1 Linear Model with Gaussian Homoscedastic and Non-correlated Errors
+## 6.2 GR4J Model with Gaussian Homoscedastic and Non-correlated Errors 
+## 6.3 GR4J Model with Gaussian Heteroscedastic and AR(1) Autocorrelated Errors
+```r
+###################################################################################
+### PART 1: LOAD LIBRARIES ########################################################
+###################################################################################
+
+library(xts)          # Time series objects with flexible indexing
+library(zoo)          # Ordered observations (used by xts)
+library(adaptMCMC)    # Adaptive MCMC sampling
+library(airGR)        # GR4J hydrological model
+library(pso)          # Particle swarm optimization (if needed)
+
+###################################################################################
+### PART 2: DEFINE PRIOR DISTRIBUTION #############################################
+###################################################################################
+
+# Log-prior function enforces uniform priors with hard bounds
+# Returns -Inf if parameters violate bounds, otherwise log-probability
+log_prior <- function(theta)
+{
+  # Check if any parameter is outside bounds
+  if (any(theta < lb) || any(theta > ub)) return(-Inf)
+  
+  # Return sum of log uniform densities
+  return(sum(dunif(theta, lb, ub, log = TRUE)))
+}
+
+###################################################################################
+### PART 3: DEFINE LIKELIHOOD FUNCTION ############################################
+###################################################################################
+
+# Likelihood with heteroscedastic AR(1) residuals
+# Implements equations (12) and (16) from the methodology
+log_likelihood_hetero_ar1 <- function(theta)
+{
+  # Extract hydrological parameters (GR4J model parameters)
+  hydro_params <- theta[1:6]
+  
+  # Extract residual error model parameters
+  a <- theta[7]      # heteroscedastic slope (flow-dependent variance)
+  b <- theta[8]      # baseline standard deviation (minimum error)
+  phi <- theta[9]    # AR(1) coefficient (temporal correlation)
+  
+  # Enforce residual parameter constraints
+  if (a < 0 || b <= 0 || abs(phi) >= 1) return(-Inf)
+  
+  # Run GR4J hydrological model to simulate streamflow
+  Q_sim_xts <- gr4j_sim(P_xts, T_xts, PET_xts, hydro_params, area_km2)
+  
+  # Merge simulated and observed flows, keeping only overlapping dates
+  merged <- merge(Q_sim_xts, Q_obs_xts, all = FALSE)
+  
+  # Remove any remaining rows with NA values
+  merged <- merged[!apply(is.na(merged), 1, any), ]
+  
+  # Extract numeric vectors for calculations
+  Q_sim <- as.numeric(merged[, 1])
+  Q_obs <- as.numeric(merged[, 2])
+  
+  # Compute flow-dependent standard deviation (equation 12)
+  # sigma_ε(t) = a * Q_sim(t) + b
+  # pmax ensures minimum threshold to prevent numerical issues
+  sigma_t <- pmax(1e-6, a * Q_sim + b)
+  
+  # Calculate raw residuals
+  res <- Q_obs - Q_sim
+  
+  # Standardized residuals (transform to stationary process)
+  # η_t = ε_t / σ_ε(t)
+  eta <- res / sigma_t
+  
+  # Initialize log-likelihood
+  # Initial condition from stationary distribution: p(η₁) = N(0, 1)
+  ll <- dnorm(eta[1], mean = 0, sd = 1, log = TRUE)
+  
+  # AR(1) conditional likelihood (equation 16)
+  # p(η_t | η_{t-1}) = N(φ·η_{t-1}, 1 - φ²)
+  for (t in 2:length(eta)) {
+    ll <- ll + dnorm(eta[t], 
+                     mean = phi * eta[t-1], 
+                     sd = sqrt(1 - phi^2), 
+                     log = TRUE)
+  }
+  
+  # Jacobian adjustment for heteroscedastic transformation
+  # Accounts for change of variables from ε_t to η_t
+  ll <- ll - sum(log(sigma_t))
+  
+  return(ll)
+}
+
+###################################################################################
+### PART 4: DEFINE POSTERIOR DISTRIBUTION #########################################
+###################################################################################
+
+# Log-posterior = log-prior + log-likelihood (Bayes' theorem)
+log_posterior <- function(theta)
+{
+  # Evaluate prior (returns -Inf if out of bounds)
+  lp <- log_prior(theta)
+  if (is.infinite(lp)) return(-Inf)
+  
+  # Evaluate likelihood
+  ll <- log_likelihood_hetero_ar1(theta)
+  
+  # Return posterior (sum in log space = product in regular space)
+  return(lp + ll)
+}
+
+###################################################################################
+### PART 5: LOAD DATA AND GR4J SIMULATOR ##########################################
+###################################################################################
+
+# Load GR4J simulation function from GitHub repository
+source("https://raw.githubusercontent.com/rarabzad/Bayesian_Model_Calibration/refs/heads/main/docs/gr4j_sim.R")
+
+# Load example basin data from airGR package
+data(L0123001)
+
+# Create time series objects for model inputs
+P_xts    <- xts(BasinObs$P,       order.by = as.Date(BasinObs$DatesR))  # Precipitation (mm/day)
+PET_xts  <- xts(BasinObs$E,       order.by = as.Date(BasinObs$DatesR))  # Potential evapotranspiration (mm/day)
+T_xts    <- xts(BasinObs$T,       order.by = as.Date(BasinObs$DatesR))  # Temperature (°C)
+Q_obs_xts <- xts(BasinObs$Qls/1000, order.by = as.Date(BasinObs$DatesR)) # Observed discharge (m³/s, converted from L/s)
+
+# Basin area for GR4J model
+area_km2 <- BasinInfo$BasinArea
+
+###################################################################################
+### PART 6: DEFINE PARAMETER BOUNDS ###############################################
+###################################################################################
+
+# Lower and upper bounds for GR4J hydrological parameters
+# [X1, X2, X3, X4, TT, DDF] - see GR4J documentation for parameter meanings
+lb_hydro  <- c(1e-3, -3, 1e-3, 0.1, -20, 1e-3)      # Lower bounds (6 parameters)
+ub_hydro  <- c(1000,  3, 500,  10,   10,  10)       # Upper bounds
+
+# Lower and upper bounds for residual error model parameters
+# [a, b, phi] - heteroscedastic slope, baseline std dev, AR(1) coefficient
+lb_resid  <- c(0,   0,   0.5)                       # Lower bounds (3 parameters)
+ub_resid  <- c(0.5, 10,  1)                         # Upper bounds
+
+# Combine all bounds (total 9 parameters)
+lb <- c(lb_hydro, lb_resid)
+ub <- c(ub_hydro, ub_resid)
+
+###################################################################################
+### PART 7: INITIALIZE MCMC PARAMETERS ############################################
+###################################################################################
+
+# Parameter scales proportional to ranges for proposal distribution
+# Start with 2% of each parameter's range
+scale_init <- (ub - lb) * 0.02
+
+# Ensure all scales are positive (avoid zero proposals)
+scale_init[scale_init <= 0] <- 0.1
+
+# Initial parameter values (midpoint of bounds)
+theta_init <- (ub + lb) / 2
+
+###################################################################################
+### PART 8: RUN BURN-IN PHASE FOR SCALE TUNING ####################################
+###################################################################################
+
+# Set seed for reproducibility
+set.seed(20122023)
+
+# Short burn-in run to adapt proposal covariance matrix
+burnin_result <- MCMC(
+  p = log_posterior,        # Target posterior distribution
+  init = theta_init,        # Starting parameter values
+  scale = scale_init,       # Initial proposal scales
+  n = 2000,                 # Number of iterations (short for tuning)
+  adapt = TRUE,             # Enable adaptive scaling
+  acc.rate = 0.5            # Target acceptance rate during adaptation
+)
+
+###################################################################################
+### PART 9: EXTRACT TUNED SCALES ##################################################
+###################################################################################
+
+# Get adapted covariance matrix for proposal distribution
+# This captures correlations between parameters learned during burn-in
+tuned_scale <- burnin_result$cov.jump
+
+# Note: Could use sqrt(diag(burnin_result$cov.jump)) if assuming independence,
+# but full covariance matrix is generally more efficient
+
+###################################################################################
+### PART 10: RUN MAIN MCMC SAMPLING ###############################################
+###################################################################################
+
+# Reset seed for main sampling
+set.seed(20122023)
+
+# Main MCMC run with optimized proposal distribution
+mcmc_result <- MCMC(
+  p = log_posterior,        # Target posterior distribution
+  init = theta_init,        # Starting parameter values
+  scale = tuned_scale,      # Adapted covariance matrix from burn-in
+  n = 10000,                # Number of iterations for main sampling
+  adapt = TRUE,             # Continue adaptation
+  acc.rate = 0.234          # Optimal acceptance rate for high dimensions
+)
+
+###################################################################################
+### PART 11: EXTRACT POST-BURN-IN SAMPLES #########################################
+###################################################################################
+
+# Discard first 7000 iterations as burn-in
+burn_in <- 7000
+samples <- mcmc_result$samples[(burn_in + 1):nrow(mcmc_result$samples), ]
+
+# Assign meaningful column names to parameter samples
+colnames(samples) <- c("X1", "X2", "X3", "X4", "TT", "DDF", "a", "b", "phi")
+
+###################################################################################
+### PART 12: PREPARE POSTERIOR PREDICTIVE SAMPLING ################################
+###################################################################################
+
+# Number of posterior samples to use for predictions
+n_pred <- 200
+
+# Randomly sample parameter sets from posterior
+pred_idx <- sample(1:nrow(samples), n_pred)
+
+# Get time structure by running model once with first parameter set
+merged_obs <- merge(gr4j_sim(P_xts, T_xts, PET_xts, samples[1, 1:6], area_km2),
+                    Q_obs_xts, all = FALSE)
+
+# Create time step index
+time_steps <- seq_len(nrow(merged_obs))
+
+# Initialize matrix to store predicted flows
+# Rows = posterior samples, Columns = time steps
+Q_pred_samples <- matrix(NA, nrow = n_pred, ncol = length(time_steps))
+
+###################################################################################
+### PART 13: GENERATE POSTERIOR PREDICTIVE SAMPLES ################################
+###################################################################################
+
+# Loop over each posterior parameter sample
+for (i in seq_len(n_pred)) {
+  # Extract i-th parameter set
+  theta_i <- samples[pred_idx[i], ]
+  
+  # Separate hydrological and residual parameters
+  hydro_params <- theta_i[1:6]
+  a <- theta_i[7]      # Heteroscedastic slope
+  b <- theta_i[8]      # Baseline standard deviation
+  phi <- theta_i[9]    # AR(1) coefficient
+  
+  # Run deterministic GR4J model
+  Q_sim_xts <- gr4j_sim(P_xts, T_xts, PET_xts, hydro_params, area_km2)
+  
+  # Align with observations
+  merged <- merge(Q_sim_xts, Q_obs_xts, all = FALSE)
+  Q_sim <- as.numeric(merged[, 1])
+  
+  # Compute flow-dependent standard deviation (equation 12)
+  sigma_t <- pmax(1e-6, a * Q_sim + b)
+  
+  # Innovation variance for AR(1) process (equation 16)
+  # Variance of white noise component: 1 - φ²
+  sigma_y <- sqrt(1 - phi^2)
+  
+  # Initialize residual vector
+  epsilon <- numeric(length(Q_sim))
+  
+  # Generate initial residual from stationary distribution
+  # η₁ ~ N(0, 1), so ε₁ = σ_ε(1) * η₁
+  epsilon[1] <- sigma_t[1] * rnorm(1, mean = 0, sd = 1)
+  
+  # Generate subsequent residuals using AR(1) process
+  for (t in 2:length(Q_sim)) {
+    # Get previous standardized residual
+    eta_prev <- epsilon[t-1] / sigma_t[t-1]
+    
+    # Generate current standardized residual: η_t = φ·η_{t-1} + y_t
+    # where y_t ~ N(0, 1 - φ²)
+    eta_t <- phi * eta_prev + rnorm(1, mean = 0, sd = sigma_y)
+    
+    # Transform back to original scale: ε_t = σ_ε(t) * η_t
+    epsilon[t] <- sigma_t[t] * eta_t
+  }
+  
+  # Add correlated residuals to deterministic simulation
+  # Q_pred = Q_sim + ε (stochastic prediction)
+  Q_pred_samples[i, ] <- Q_sim + epsilon
+}
+
+###################################################################################
+### PART 14: COMPUTE SUMMARY STATISTICS ###########################################
+###################################################################################
+
+# Calculate mean prediction across all posterior samples
+Q_mean_pred <- colMeans(Q_pred_samples)
+
+# Calculate median prediction (more robust to outliers)
+Q_median_pred <- apply(Q_pred_samples, 2, median)
+
+# Compute 50% credible interval (interquartile range)
+Q_lower_50 <- apply(Q_pred_samples, 2, quantile, probs = 0.25)
+Q_upper_50 <- apply(Q_pred_samples, 2, quantile, probs = 0.75)
+
+# Compute 90% credible interval
+Q_lower_90 <- apply(Q_pred_samples, 2, quantile, probs = 0.05)
+Q_upper_90 <- apply(Q_pred_samples, 2, quantile, probs = 0.95)
+
+###################################################################################
+### PART 15: EXTRACT DATA FOR PLOTTING ############################################
+###################################################################################
+
+# Get time index from merged observations
+time_index <- index(merged_obs)
+
+# Extract observed discharge values
+Q_obs <- as.numeric(merged_obs[, 2])
+
+###################################################################################
+### PART 16: PLOT POSTERIOR PREDICTIVE CHECK ######################################
+###################################################################################
+
+# Set up single plot layout
+par(mfrow = c(1, 1), mar = c(4, 4, 2, 1))
+
+# Initialize empty plot with appropriate y-axis limits
+plot(time_index, Q_obs, type = "n", 
+     ylim = c(0, max(c(Q_obs, Q_pred_samples), na.rm = TRUE)), 
+     xlab = "Time", 
+     ylab = "Discharge (m³/s)", 
+     main = "Posterior Predictive Check: Observed vs Predicted")
+
+# Add 90% credible interval (light gray shading)
+polygon(c(time_index, rev(time_index)), 
+        c(Q_lower_90, rev(Q_upper_90)),
+        col = rgb(0.7, 0.7, 0.7, 0.3),  # Light gray with transparency
+        border = NA)
+
+# Add 50% credible interval (darker gray shading)
+polygon(c(time_index, rev(time_index)), 
+        c(Q_lower_50, rev(Q_upper_50)),
+        col = rgb(0.5, 0.5, 0.5, 0.4),  # Darker gray with transparency
+        border = NA)
+
+# Add posterior mean prediction line
+lines(time_index, Q_mean_pred, col = "blue", lwd = 1)
+
+# Add observed data points
+points(time_index, Q_obs, pch = 19, cex = 0.2, col = "black")
+
+# Add legend
+legend("topright", 
+       c("Observed", "Posterior Mean", "50% Interval", "90% Interval"),
+       col = c("black", "blue", rgb(0.5, 0.5, 0.5, 0.4), rgb(0.7, 0.7, 0.7, 0.3)),
+       pch = c(19, NA, 15, 15), 
+       lty = c(NA, 1, NA, NA), 
+       lwd = c(NA, 2, NA, NA))
+
+###################################################################################
+### PART 17: CREATE SPAGHETTI PLOT ################################################
+###################################################################################
+
+# Plot observed discharge as base
+plot(time_index, Q_obs, type = "l", lwd = 2, col = "black",
+     ylim = c(0, max(c(Q_obs, Q_pred_samples), na.rm = TRUE)),
+     xlab = "Time", 
+     ylab = "Discharge (m³/s)",
+     main = "Spaghetti Plot: 50 Posterior Predictive Realizations")
+
+# Overlay 50 random predictive realizations (semi-transparent blue)
+for (i in 1:50) {
+  lines(time_index, Q_pred_samples[i, ], col = rgb(0, 0, 1, 0.1))
+}
+
+# Re-draw observed data on top for visibility
+lines(time_index, Q_obs, lwd = 2, col = "black")
+
+###################################################################################
+### PART 18: COMPUTE FLOW DURATION CURVES #########################################
+###################################################################################
+
+# Sort observed discharge in descending order for FDC
+Q_obs_sorted <- sort(Q_obs, decreasing = TRUE)
+
+# Calculate exceedance probability (percentage of time flow is exceeded)
+exceedance_prob <- seq_along(Q_obs_sorted) / length(Q_obs_sorted)
+
+# Compute FDC for each predictive realization
+# Each column = FDC for one posterior sample
+Q_pred_fdc <- apply(Q_pred_samples, 1, function(x) quantile(x, probs = 1 - exceedance_prob))
+
+###################################################################################
+### PART 19: PLOT FLOW DURATION CURVES ############################################
+###################################################################################
+
+# Plot observed FDC on log-scale y-axis
+plot(exceedance_prob, Q_obs_sorted, type = "l", lwd = 3, col = "black",
+     log = "y",  # Logarithmic y-axis to show full range of flows
+     xlab = "Exceedance Probability", 
+     ylab = "Discharge (m³/s)",
+     main = "Flow Duration Curve: Observed vs Predictive Ensemble")
+
+# Overlay predictive FDCs (every 10th sample to reduce clutter)
+for (i in seq(1, n_pred, by = 10)) {
+  lines(exceedance_prob, Q_pred_fdc[, i], col = rgb(0, 0, 1, 0.2))
+}
+
+# Re-draw observed FDC on top
+lines(exceedance_prob, Q_obs_sorted, lwd = 3, col = "black")
+
+# Add legend
+legend("topright", 
+       c("Observed", "Predictive Ensemble"),
+       col = c("black", "blue"), 
+       lwd = c(3, 1))
+
+###################################################################################
+### PART 20: CALCULATE COVERAGE STATISTICS ########################################
+###################################################################################
+
+# Calculate proportion of observations falling within 50% credible interval
+coverage_50 <- mean(Q_obs >= Q_lower_50 & Q_obs <= Q_upper_50, na.rm = TRUE)
+
+# Calculate proportion of observations falling within 90% credible interval
+coverage_90 <- mean(Q_obs >= Q_lower_90 & Q_obs <= Q_upper_90, na.rm = TRUE)
+
+# Print coverage diagnostics
+# Ideally: 50% coverage ≈ 0.50, 90% coverage ≈ 0.90
+# Lower values suggest underestimation of uncertainty
+# Higher values suggest overestimation of uncertainty
+cat("50% Credible Interval Coverage:", round(coverage_50, 3), "\n")
+cat("90% Credible Interval Coverage:", round(coverage_90, 3), "\n")
+
+###################################################################################
+### END OF SCRIPT #################################################################
+###################################################################################
+```
+
+
+
