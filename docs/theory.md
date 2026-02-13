@@ -9,6 +9,7 @@
   * [1.2 Traditional Calibration Approaches](#12-traditional-calibration-approaches)
   * [1.3 Motivation for Bayesian Calibration](#13-motivation-for-bayesian-calibration)
   * [1.4 Conceptual View of Bayesian Learning](#14-conceptual-view-of-bayesian-learning)
+  * [1.5 software and packages installation](#15-software-and-packages-installation)
 * [2. Foundations of Bayesian Theory](#2-foundations-of-bayesian-theory)
   * [2.1 Bayes' Theorem](#21-bayes-theorem)
   * [2.2 Interpretation of Bayesian Components](#22-interpretation-of-bayesian-components)
@@ -173,7 +174,174 @@ Bayesian inference can be understood as a process of updating scientific beliefs
 
 This learning process is iterative and cumulative. As additional observations become available, parameter distributions can be further refined. This adaptive nature of Bayesian inference makes it particularly suitable for hydrologic systems where new data may become available through extended monitoring programs or improved measurement technologies.
 
----
+## 1.5 software and packages installation
+
+# R Requirements for Bayesian Hydrologic Model Calibration
+
+## System Requirements
+
+- **R version**: ≥ 4.0.0 (recommended: latest stable release)
+- **Operating System**: Windows, macOS, or Linux
+- **RAM**: Minimum 1GB (2GB+ recommended for large MCMC runs)
+- **Storage**: ~1024MB for packages and dependencies
+
+## Required R Packages
+
+### Core Dependencies
+
+| Package | Purpose | Version |
+|---------|---------|---------|
+| `xts` | Time series objects with flexible indexing | ≥ 0.12.0 |
+| `zoo` | Ordered observations (used by xts) | ≥ 1.8.0 |
+| `adaptMCMC` | Adaptive MCMC sampling | ≥ 1.5.0 |
+| `airGR` | GR4J hydrological model | ≥ 1.7.0 |
+| `coda` | MCMC diagnostics and visualization | ≥ 0.19.0 |
+| `rgl` | 3D visualization for posterior surfaces | ≥ 1.0.0 |
+
+## Installation
+
+```r
+# Install required packages
+install.packages(c(
+  "xts",
+  "zoo", 
+  "adaptMCMC",
+  "airGR",
+  "coda",
+  "rgl"
+))
+```
+
+
+### Check Installation
+
+```r
+# Verify all required packages are installed
+required_packages <- c("xts", "zoo", "adaptMCMC", "airGR", "coda", "rgl")
+
+# Check which packages are missing
+missing_packages <- required_packages[!(required_packages %in% installed.packages()[,"Package"])]
+
+if(length(missing_packages) == 0) {
+  cat("✓ All required packages are installed!\n")
+} else {
+  cat("✗ Missing packages:", paste(missing_packages, collapse = ", "), "\n")
+  cat("  Run: install.packages(c('", paste(missing_packages, collapse = "', '"), "'))\n", sep = "")
+}
+```
+
+## Loading Packages
+
+### Standard Workflow
+
+```r
+# Load required libraries
+# Suppress startup messages (optional)
+suppressPackageStartupMessages({
+  library(xts)
+  library(zoo)
+  library(adaptMCMC)
+  library(airGR)
+  library(coda)
+  library(rgl)
+})
+```
+
+## External Resources
+
+### GR4J Simulator Function
+
+The workflow requires the `gr4j_sim()` function, loaded from GitHub:
+
+```r
+# Load GR4J simulation function
+source("https://raw.githubusercontent.com/rarabzad/Bayesian_Model_Calibration/refs/heads/main/docs/gr4j_sim.R")
+```
+
+**Note**: Requires internet connection during first run. The function will be loaded into your R session.
+
+## Session Information
+
+To ensure reproducibility, save your session info:
+
+```r
+# Print session information
+sessionInfo()
+
+# Save to file (optional)
+writeLines(capture.output(sessionInfo()), "session_info.txt")
+```
+
+## Troubleshooting
+
+### Common Installation Issues
+
+**Issue**: Package installation fails with compilation errors
+
+**Solution**: 
+```r
+# Install binary packages (Windows/Mac)
+install.packages("package_name", type = "binary")
+
+# Or install from CRAN archive (specific version)
+install.packages("https://cran.r-project.org/src/contrib/Archive/package_name/package_name_version.tar.gz", 
+                 repos = NULL, type = "source")
+```
+
+**Issue**: `airGR` installation fails
+
+**Solution**:
+```r
+# Install dependencies first
+install.packages(c("Rcpp", "RcppArmadillo"))
+install.packages("airGR")
+```
+
+**Issue**: `rgl` installation fails (Linux)
+
+**Solution**: Install system dependencies first
+```bash
+# Ubuntu/Debian
+sudo apt-get install libglu1-mesa-dev libx11-dev
+
+# Fedora/RHEL
+sudo yum install libGLU-devel libX11-devel
+
+# Then install in R
+install.packages("rgl")
+```
+
+**Issue**: `rgl` OpenGL errors on remote servers
+
+**Solution**: Use software rendering or disable 3D plots
+```r
+# Option 1: Use software rendering
+Sys.setenv(RGL_USE_NULL = TRUE)
+
+# Option 2: Skip rgl visualizations and use 2D alternatives
+# Comment out rgl::persp3d() calls in code
+```
+
+## Version Compatibility
+
+This workflow has been tested with:
+
+- **R**: 4.3.2 (2023-10-31)
+- **xts**: 0.13.1
+- **zoo**: 1.8-12
+- **adaptMCMC**: 1.5
+- **airGR**: 1.7.6
+- **coda**: 0.19-4
+- **rgl**: 1.2.8
+
+Newer versions should work, but if you encounter issues, try installing these specific versions:
+
+```r
+# Install specific versions using remotes package
+install.packages("remotes")
+remotes::install_version("airGR", version = "1.7.6")
+remotes::install_version("rgl", version = "1.2.8")
+```
 
 # 2. Foundations of Bayesian Theory
 
@@ -668,6 +836,9 @@ where:
 * $\beta_0$ is the intercept parameter
 * $\beta_1$ is the slope parameter
 * $\varepsilon$ represents residual error
+
+![Descriptive alt text](https://blogs.sas.com/content/iml/files/2015/09/GLM_lognormal.png)
+
 
 Residual errors are assumed Gaussian:
 
@@ -1197,7 +1368,8 @@ This expression reveals several important features:
 ```r
 # Log-likelihood function
 # Returns the log-probability of data given parameters
-log_likelihood <- function(theta, x, y) {
+log_likelihood <- function(theta)
+{
   beta0 <- theta[1]  # Extract intercept
   beta1 <- theta[2]  # Extract slope
   sigma <- theta[3]  # Extract residual standard deviation
@@ -1213,27 +1385,6 @@ log_likelihood <- function(theta, x, y) {
   # dnorm(y, y_pred, sigma, log=TRUE) computes log of Gaussian density
   # Sum over all observations because of independence assumption
   log_lik <- sum(dnorm(y, mean = y_pred, sd = sigma, log = TRUE))
-  
-  return(log_lik)
-}
-
-# Alternative explicit form showing all terms:
-log_likelihood_explicit <- function(theta, x, y) {
-  beta0 <- theta[1]
-  beta1 <- theta[2]
-  sigma <- theta[3]
-  
-  n <- length(y)
-  y_pred <- beta0 + beta1 * x
-  residuals <- y - y_pred
-  
-  # First term: normalizing constant
-  term1 <- -(n/2) * log(2 * pi * sigma^2)
-  
-  # Second term: weighted sum of squared errors
-  term2 <- -sum(residuals^2) / (2 * sigma^2)
-  
-  log_lik <- term1 + term2
   
   return(log_lik)
 }
@@ -1275,7 +1426,7 @@ sigma_fixed <- 1.2
 # Evaluate log-likelihood over grid
 log_lik_surface <- outer(beta0_grid, beta1_grid, function(b0, b1) {
   sapply(1:length(b0), function(i) {
-    log_likelihood(c(b0[i], b1[i], sigma_fixed), x, y)
+    log_likelihood(c(b0[i], b1[i], sigma_fixed))
   })
 })
 
@@ -1285,6 +1436,9 @@ contour(beta0_grid, beta1_grid, log_lik_surface,
         xlab = "beta0", ylab = "beta1",
         main = "Log-Likelihood Surface")
 points(beta0_true, beta1_true, pch = 19, col = "red", cex = 2)
+
+rgl::persp3d(beta0_grid,beta1_grid,log_lik_surface,col="white")
+
 ```
 
 This visualization reveals:
@@ -1469,7 +1623,8 @@ In hydrologic calibration:
 # Log-posterior density function
 # Returns the log-probability of parameters given data
 # This is the target distribution for MCMC sampling
-log_posterior <- function(theta, x, y) {
+log_posterior <- function(theta)
+{
   
   # Compute log-prior
   # If prior is zero (e.g., sigma < 0), return -Inf immediately
@@ -1477,7 +1632,7 @@ log_posterior <- function(theta, x, y) {
   if(is.infinite(lp)) return(lp)
   
   # Compute log-likelihood
-  ll <- log_likelihood(theta, x, y)
+  ll <- log_likelihood(theta)
   
   # Return log-posterior = log-prior + log-likelihood
   # This is equivalent to prior * likelihood in original scale
@@ -1526,12 +1681,12 @@ We omit $\log p(y)$ because it's constant with respect to $\theta$ (doesn't depe
 ```r
 # Test at true parameter values
 theta_true <- c(beta0_true, beta1_true, sigma_true)
-log_post_true <- log_posterior(theta_true, x, y)
+log_post_true <- log_posterior(theta_true)
 print(paste("Log-posterior at true values:", log_post_true))
 
 # Test at random values
 theta_random <- c(rnorm(1, 0, 10), rnorm(1, 0, 10), abs(rnorm(1, 0, 5)))
-log_post_random <- log_posterior(theta_random, x, y)
+log_post_random <- log_posterior(theta_random)
 print(paste("Log-posterior at random values:", log_post_random))
 
 # The true values should generally have higher log-posterior
@@ -1550,7 +1705,7 @@ beta1_seq <- seq(0.5, 3, length.out = 100)
 # Compute log-posterior over grid
 log_post_grid <- outer(beta0_seq, beta1_seq, function(b0, b1) {
   sapply(1:length(b0), function(i) {
-    log_posterior(c(b0[i], b1[i], sigma_true), x, y)
+    log_posterior(c(b0[i], b1[i], sigma_true))
   })
 })
 
@@ -1564,6 +1719,9 @@ contour(beta0_seq, beta1_seq, post_grid,
         xlab = "beta0", ylab = "beta1",
         main = "Posterior Distribution (conditional on sigma)")
 points(beta0_true, beta1_true, pch = 19, col = "red", cex = 2)
+
+rgl::persp3d(beta0_seq, beta1_seq, post_grid,col="red)
+
 ```
 
 This shows the posterior before MCMC—a useful sanity check to ensure our model specification makes sense.
@@ -1754,8 +1912,6 @@ mcmc_result <- MCMC(
   adapt = TRUE,             # Enable adaptive tuning
   acc.rate = 0.234,         # Target acceptance rate (optimal for random walk)
   scale = c(0.5, 0.5, 0.2), # Initial proposal scales (will be adapted)
-  x = x,                    # Additional arguments passed to log_posterior
-  y = y
 )
 
 # Discard burn-in period
@@ -1770,7 +1926,7 @@ colnames(samples) <- c("beta0", "beta1", "sigma")
 # Convert to 'coda' mcmc object for diagnostics
 # This enables traceplot(), densplot(), etc.
 samples_mcmc <- as.mcmc(samples)
-
+plot(samples_mcmc)
 # Print summary
 print(paste("Total iterations:", nrow(mcmc_result$samples)))
 print(paste("Burn-in discarded:", burn_in))
@@ -3163,7 +3319,7 @@ where $p(\theta \mid Q_{\text{obs}})$ is the posterior distribution, $p(Q_{\text
 | Unit hydrograph time base | **X4** | Controls timing/spread of quickflow | days |
 | Temperature split | **TT** | Threshold for rain/snow split in degree‑day module | °C |
 | Degree‑day factor | **DDF** | Melt rate per °C above TT | mm °C⁻¹ day⁻¹ |
-| Residual SD | **σ** | Standard deviation of observation‑model residuals | m³/s |
+| Residual SD **(error model)** | **σ** | Standard deviation of observation‑model residuals | m³/s |
 
 ### Detailed Parameter Interpretation
 
@@ -4298,9 +4454,391 @@ Residual diagnostics are not a one-time check but part of an **iterative model d
 
 
 # 6. Complete Workflows
-## 6.1 Linear Model with Gaussian Homoscedastic and Non-correlated Errors
-## 6.2 GR4J Model with Gaussian Homoscedastic and Non-correlated Errors 
+## 6.1 GR4J Model with Gaussian Homoscedastic and Non-correlated Errors 
+### 6.1.1 Parameter list and interpretation
+| **Parameter** | **Symbol** | **Meaning** | **Units** |
+|---------------|------------|-------------|-----------|
+| Production store capacity | **X1** | Controls partitioning between evapotranspiration and runoff generation | mm |
+| Groundwater exchange coefficient | **X2** | Exchange between fast and slow components (model scaling) | dimensionless |
+| Routing store capacity | **X3** | Controls slow flow magnitude and baseflow | mm |
+| Unit hydrograph time base | **X4** | Controls timing/spread of quickflow | days |
+| Temperature split | **TT** | Threshold for rain/snow split in degree‑day module | °C |
+| Degree‑day factor | **DDF** | Melt rate per °C above TT | mm °C⁻¹ day⁻¹ |
+| Residual SD **(error model)** | **σ** | Standard deviation of observation‑model residuals | m³/s |
+### 6.2.2 Full inference/post inefernce setup
+```r
+###################################################################################
+### PART 1: LOAD LIBRARIES ########################################################
+###################################################################################
+
+library(xts)          # Time series objects with flexible indexing
+library(zoo)          # Ordered observations (used by xts)
+library(adaptMCMC)    # Adaptive MCMC sampling
+library(airGR)        # GR4J hydrological model
+library(pso)          # Particle swarm optimization (if needed)
+
+###################################################################################
+### PART 2: DEFINE PRIOR DISTRIBUTION #############################################
+###################################################################################
+
+# Log-prior function enforces uniform priors with hard bounds
+# Returns -Inf if parameters violate bounds, otherwise log-probability
+log_prior <- function(theta)
+{
+  # Check if any parameter is outside bounds
+  if (any(theta < lb) || any(theta > ub)) return(-Inf)
+  
+  # Return sum of log uniform densities
+  return(sum(dunif(theta, lb, ub, log = TRUE)))
+}
+
+###################################################################################
+### PART 3: DEFINE LIKELIHOOD FUNCTION ############################################
+###################################################################################
+
+# Likelihood with heteroscedastic AR(1) residuals
+# Implements equations (12) and (16) from the methodology
+log_likelihood_homo <- function(theta)
+{
+  hydro_params <- theta[1:6]
+  sigma <- theta[7]
+  if (sigma <= 0) return(-Inf)
+  Q_sim_xts <- gr4j_sim(P_xts, T_xts, PET_xts, hydro_params, area_km2)
+  merged <- merge(Q_sim_xts, Q_obs_xts, all = FALSE)
+  merged<-merged[!apply(is.na(merged),1,any),]
+  Q_sim <- as.numeric(merged[,1]); Q_obs <- as.numeric(merged[,2])
+  if (length(Q_obs) == 0) return(-Inf)
+  ll <- sum(dnorm(Q_obs, mean = Q_sim, sd = sigma, log = TRUE))
+  return(ll)
+}
+
+###################################################################################
+### PART 4: DEFINE POSTERIOR DISTRIBUTION #########################################
+###################################################################################
+
+# Log-posterior = log-prior + log-likelihood (Bayes' theorem)
+log_posterior <- function(theta)
+{
+  # Evaluate prior (returns -Inf if out of bounds)
+  lp <- log_prior(theta)
+  if (is.infinite(lp)) return(-Inf)
+  
+  # Evaluate likelihood
+  ll <- log_likelihood_homo(theta)
+  
+  # Return posterior (sum in log space = product in regular space)
+  return(lp + ll)
+}
+
+###################################################################################
+### PART 5: LOAD DATA AND GR4J SIMULATOR ##########################################
+###################################################################################
+
+# Load GR4J simulation function from GitHub repository
+source("https://raw.githubusercontent.com/rarabzad/Bayesian_Model_Calibration/refs/heads/main/docs/gr4j_sim.R")
+
+# Load example basin data from airGR package
+data(L0123001)
+
+# Create time series objects for model inputs
+P_xts    <- xts(BasinObs$P,       order.by = as.Date(BasinObs$DatesR))  # Precipitation (mm/day)
+PET_xts  <- xts(BasinObs$E,       order.by = as.Date(BasinObs$DatesR))  # Potential evapotranspiration (mm/day)
+T_xts    <- xts(BasinObs$T,       order.by = as.Date(BasinObs$DatesR))  # Temperature (°C)
+Q_obs_xts <- xts(BasinObs$Qls/1000, order.by = as.Date(BasinObs$DatesR)) # Observed discharge (m³/s, converted from L/s)
+
+# Basin area for GR4J model
+area_km2 <- BasinInfo$BasinArea
+
+###################################################################################
+### PART 6: DEFINE PARAMETER BOUNDS ###############################################
+###################################################################################
+
+# Lower and upper bounds for GR4J hydrological parameters
+# [X1, X2, X3, X4, TT, DDF] - see GR4J documentation for parameter meanings
+lb_hydro  <- c(1e-3, -3, 1e-3, 0.1, -20, 1e-3)      # Lower bounds (6 parameters)
+ub_hydro  <- c(1000,  3, 500,  10,   10,  10)       # Upper bounds
+
+# Lower and upper bounds for residual error model parameters
+# [sigma] - homoscedastic error model
+lb_resid  <- c(0)                                                                             # Lower bounds (1 parameters)
+ub_resid  <- c(as.numeric(summary(as.numeric(Q_obs_xts),na.rm=T)[3]))                         # Upper bounds
+
+# Combine all bounds (total 9 parameters)
+lb <- c(lb_hydro, lb_resid)
+ub <- c(ub_hydro, ub_resid)
+
+###################################################################################
+### PART 7: INITIALIZE MCMC PARAMETERS ############################################
+###################################################################################
+
+# Parameter scales proportional to ranges for proposal distribution
+# Start with 2% of each parameter's range
+scale_init <- (ub - lb) * 0.02
+
+# Ensure all scales are positive (avoid zero proposals)
+scale_init[scale_init <= 0] <- 0.1
+
+# Initial parameter values (midpoint of bounds)
+theta_init <- (ub + lb) / 2
+
+###################################################################################
+### PART 8: RUN BURN-IN PHASE FOR SCALE TUNING ####################################
+###################################################################################
+
+# Set seed for reproducibility
+set.seed(20122023)
+
+# Short burn-in run to adapt proposal covariance matrix
+burnin_result <- MCMC(
+  p = log_posterior,        # Target posterior distribution
+  init = theta_init,        # Starting parameter values
+  scale = scale_init,       # Initial proposal scales
+  n = 2000,                 # Number of iterations (short for tuning)
+  adapt = TRUE,             # Enable adaptive scaling
+  acc.rate = 0.5            # Target acceptance rate during adaptation
+)
+
+###################################################################################
+### PART 9: EXTRACT TUNED SCALES ##################################################
+###################################################################################
+
+# Get adapted covariance matrix for proposal distribution
+# This captures correlations between parameters learned during burn-in
+tuned_scale <- burnin_result$cov.jump
+
+# Note: Could use sqrt(diag(burnin_result$cov.jump)) if assuming independence,
+# but full covariance matrix is generally more efficient
+
+###################################################################################
+### PART 10: RUN MAIN MCMC SAMPLING ###############################################
+###################################################################################
+
+# Reset seed for main sampling
+set.seed(20122023)
+
+# Main MCMC run with optimized proposal distribution
+mcmc_result <- MCMC(
+  p = log_posterior,        # Target posterior distribution
+  init = theta_init,        # Starting parameter values
+  scale = tuned_scale,      # Adapted covariance matrix from burn-in
+  n = 10000,                # Number of iterations for main sampling
+  adapt = TRUE,             # Continue adaptation
+  acc.rate = 0.234          # Optimal acceptance rate for high dimensions
+)
+
+###################################################################################
+### PART 11: EXTRACT POST-BURN-IN SAMPLES #########################################
+###################################################################################
+
+# Discard first 7000 iterations as burn-in
+burn_in <- 7000
+samples <- mcmc_result$samples[(burn_in + 1):nrow(mcmc_result$samples), ]
+
+# Assign meaningful column names to parameter samples
+colnames(samples) <- c("X1", "X2", "X3", "X4", "TT", "DDF", "sigma")
+
+###################################################################################
+### PART 12: PREPARE POSTERIOR PREDICTIVE SAMPLING ################################
+###################################################################################
+
+# Number of posterior samples to use for predictions
+n_pred <- 200
+
+# Randomly sample parameter sets from posterior
+pred_idx <- sample(1:nrow(samples), n_pred)
+
+# Get time structure by running model once with first parameter set
+merged_obs <- merge(gr4j_sim(P_xts, T_xts, PET_xts, samples[1, 1:6], area_km2),
+                    Q_obs_xts, all = FALSE)
+
+# Create time step index
+time_steps <- seq_len(nrow(merged_obs))
+
+# Initialize matrix to store predicted flows
+# Rows = posterior samples, Columns = time steps
+Q_pred_samples <- matrix(NA, nrow = n_pred, ncol = length(time_steps))
+
+###################################################################################
+### PART 13: GENERATE POSTERIOR PREDICTIVE SAMPLES ################################
+###################################################################################
+
+# Loop over each posterior parameter sample
+for (i in seq_len(n_pred)) {
+  theta_i <- samples[pred_idx[i], ]
+  hydro_params <- theta_i[1:6]
+  sigma_i <- theta_i[7]
+
+  Q_sim_xts <- gr4j_sim(P_xts, T_xts, PET_xts, hydro_params, area_km2)
+  merged <- merge(Q_sim_xts, Q_obs_xts, all = FALSE)
+  Q_sim <- as.numeric(merged[,1])
+  
+  # Add residual noise to create predictive replicates
+  Q_pred_samples[i, ] <- rnorm(length(Q_sim), mean = Q_sim, sd = sigma_i)
+}
+
+###################################################################################
+### PART 14: COMPUTE SUMMARY STATISTICS ###########################################
+###################################################################################
+
+# Calculate mean prediction across all posterior samples
+Q_mean_pred <- colMeans(Q_pred_samples)
+
+# Calculate median prediction (more robust to outliers)
+Q_median_pred <- apply(Q_pred_samples, 2, median)
+
+# Compute 50% credible interval (interquartile range)
+Q_lower_50 <- apply(Q_pred_samples, 2, quantile, probs = 0.25)
+Q_upper_50 <- apply(Q_pred_samples, 2, quantile, probs = 0.75)
+
+# Compute 90% credible interval
+Q_lower_90 <- apply(Q_pred_samples, 2, quantile, probs = 0.05)
+Q_upper_90 <- apply(Q_pred_samples, 2, quantile, probs = 0.95)
+
+###################################################################################
+### PART 15: EXTRACT DATA FOR PLOTTING ############################################
+###################################################################################
+
+# Get time index from merged observations
+time_index <- index(merged_obs)
+
+# Extract observed discharge values
+Q_obs <- as.numeric(merged_obs[, 2])
+
+###################################################################################
+### PART 16: PLOT POSTERIOR PREDICTIVE CHECK ######################################
+###################################################################################
+
+# Set up single plot layout
+par(mfrow = c(1, 1), mar = c(4, 4, 2, 1))
+
+# Initialize empty plot with appropriate y-axis limits
+plot(time_index, Q_obs, type = "n", 
+     ylim = c(0, max(c(Q_obs, Q_pred_samples), na.rm = TRUE)), 
+     xlab = "Time", 
+     ylab = "Discharge (m³/s)", 
+     main = "Posterior Predictive Check: Observed vs Predicted")
+
+# Add 90% credible interval (light gray shading)
+polygon(c(time_index, rev(time_index)), 
+        c(Q_lower_90, rev(Q_upper_90)),
+        col = rgb(0.7, 0.7, 0.7, 0.3),  # Light gray with transparency
+        border = NA)
+
+# Add 50% credible interval (darker gray shading)
+polygon(c(time_index, rev(time_index)), 
+        c(Q_lower_50, rev(Q_upper_50)),
+        col = rgb(0.5, 0.5, 0.5, 0.4),  # Darker gray with transparency
+        border = NA)
+
+# Add posterior mean prediction line
+lines(time_index, Q_mean_pred, col = "blue", lwd = 1)
+
+# Add observed data points
+points(time_index, Q_obs, pch = 19, cex = 0.2, col = "black")
+
+# Add legend
+legend("topright", 
+       c("Observed", "Posterior Mean", "50% Interval", "90% Interval"),
+       col = c("black", "blue", rgb(0.5, 0.5, 0.5, 0.4), rgb(0.7, 0.7, 0.7, 0.3)),
+       pch = c(19, NA, 15, 15), 
+       lty = c(NA, 1, NA, NA), 
+       lwd = c(NA, 2, NA, NA))
+
+###################################################################################
+### PART 17: CREATE SPAGHETTI PLOT ################################################
+###################################################################################
+
+# Plot observed discharge as base
+plot(time_index, Q_obs, type = "l", lwd = 2, col = "black",
+     ylim = c(0, max(c(Q_obs, Q_pred_samples), na.rm = TRUE)),
+     xlab = "Time", 
+     ylab = "Discharge (m³/s)",
+     main = "Spaghetti Plot: 50 Posterior Predictive Realizations")
+
+# Overlay 50 random predictive realizations (semi-transparent blue)
+for (i in 1:50) {
+  lines(time_index, Q_pred_samples[i, ], col = rgb(0, 0, 1, 0.1))
+}
+
+# Re-draw observed data on top for visibility
+lines(time_index, Q_obs, lwd = 2, col = "black")
+
+###################################################################################
+### PART 18: COMPUTE FLOW DURATION CURVES #########################################
+###################################################################################
+
+# Sort observed discharge in descending order for FDC
+Q_obs_sorted <- sort(Q_obs, decreasing = TRUE)
+
+# Calculate exceedance probability (percentage of time flow is exceeded)
+exceedance_prob <- seq_along(Q_obs_sorted) / length(Q_obs_sorted)
+
+# Compute FDC for each predictive realization
+# Each column = FDC for one posterior sample
+Q_pred_fdc <- apply(Q_pred_samples, 1, function(x) quantile(x, probs = 1 - exceedance_prob))
+
+###################################################################################
+### PART 19: PLOT FLOW DURATION CURVES ############################################
+###################################################################################
+
+# Plot observed FDC on log-scale y-axis
+plot(exceedance_prob, Q_obs_sorted, type = "l", lwd = 3, col = "black",
+     log = "y",  # Logarithmic y-axis to show full range of flows
+     xlab = "Exceedance Probability", 
+     ylab = "Discharge (m³/s)",
+     main = "Flow Duration Curve: Observed vs Predictive Ensemble")
+
+# Overlay predictive FDCs (every 10th sample to reduce clutter)
+for (i in seq(1, n_pred, by = 10)) {
+  lines(exceedance_prob, Q_pred_fdc[, i], col = rgb(0, 0, 1, 0.2))
+}
+
+# Re-draw observed FDC on top
+lines(exceedance_prob, Q_obs_sorted, lwd = 3, col = "black")
+
+# Add legend
+legend("topright", 
+       c("Observed", "Predictive Ensemble"),
+       col = c("black", "blue"), 
+       lwd = c(3, 1))
+
+###################################################################################
+### PART 20: CALCULATE COVERAGE STATISTICS ########################################
+###################################################################################
+
+# Calculate proportion of observations falling within 50% credible interval
+coverage_50 <- mean(Q_obs >= Q_lower_50 & Q_obs <= Q_upper_50, na.rm = TRUE)
+
+# Calculate proportion of observations falling within 90% credible interval
+coverage_90 <- mean(Q_obs >= Q_lower_90 & Q_obs <= Q_upper_90, na.rm = TRUE)
+
+# Print coverage diagnostics
+# Ideally: 50% coverage ≈ 0.50, 90% coverage ≈ 0.90
+# Lower values suggest underestimation of uncertainty
+# Higher values suggest overestimation of uncertainty
+cat("50% Credible Interval Coverage:", round(coverage_50, 3), "\n")
+cat("90% Credible Interval Coverage:", round(coverage_90, 3), "\n")
+
+###################################################################################
+### END OF SCRIPT #################################################################
+###################################################################################
+```
+
 ## 6.3 GR4J Model with Gaussian Heteroscedastic and AR(1) Autocorrelated Errors
+### 6.3.1 Parameter list and interpretation
+| **Parameter** | **Symbol** | **Meaning** | **Units** |
+|---------------|------------|-------------|-----------|
+| Production store capacity | **X1** | Controls partitioning between evapotranspiration and runoff generation | mm |
+| Groundwater exchange coefficient | **X2** | Exchange between fast and slow components (model scaling) | dimensionless |
+| Routing store capacity | **X3** | Controls slow flow magnitude and baseflow | mm |
+| Unit hydrograph time base | **X4** | Controls timing/spread of quickflow | days |
+| Temperature split | **TT** | Threshold for rain/snow split in degree‑day module | °C |
+| Degree‑day factor | **DDF** | Melt rate per °C above TT | mm °C⁻¹ day⁻¹ |
+| Residual SD a **(error model)** | **a** | Standard deviation of observation‑model residuals | - |
+| Residual SD b **(error model)** | **b** | Standard deviation of observation‑model residuals | - |
+| Residual autocorrelation **(error model)** | **φ** | Standard deviation of observation‑model residuals | - |
+
+### 6.3.2 Full inference/post inefernce setup
 ```r
 ###################################################################################
 ### PART 1: LOAD LIBRARIES ########################################################
