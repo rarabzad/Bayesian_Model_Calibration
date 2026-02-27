@@ -5288,6 +5288,105 @@ cat("90% Credible Interval Coverage:", round(coverage_90, 3), "\n")
 ###################################################################################
 ```
 ## 6.3 GR4J Model inference (negative flow treatment)
+
+### Flow-dependent noise size (heteroscedastic standard deviation)
+
+$$\sigma_{\varepsilon}(t) = a \cdot \log(Q_{\text{sim},t}) + b$$
+
+This formula answers the question *"how much error should we expect at each time step?"* The noise is not constant — it grows with flow magnitude. During a flood, absolute prediction errors are naturally larger than during low-flow periods. The parameter $a$ controls how steeply noise grows with flow, and $b$ sets a baseline minimum noise that exists even when flows are very small.
+
+Think of predicting the height of ocean waves. You expect bigger errors when predicting a 10-metre storm surge than a 0.5-metre calm-day ripple, even if your forecasting skill is the same. The error scales with the magnitude of what you are predicting.
+
+| Symbol | Meaning |
+|--------|---------|
+| $\sigma_{\varepsilon}(t)$ | How much noise to expect at time step $t$ |
+| $a$ | Slope — how fast noise grows with flow |
+| $b$ | Intercept — minimum noise even at low flows |
+| $Q_{\text{sim},t}$ | Simulated flow at time $t$ |
+
+---
+
+### Standardised residual (removing the flow-dependence)
+
+$$\eta_t = \frac{\varepsilon_t}{\sigma_{\varepsilon}(t)}$$
+
+We divide the raw error by the expected noise size at that time step. This transforms all residuals onto the same scale — a flood-day residual of 5 m³/s and a low-flow-day residual of 0.05 m³/s both become a standardised score that can be compared fairly. After this transformation, every $\eta_t$ has the same variance (equal to 1) regardless of whether the day was a flood or a drought.
+
+This is exactly what a z-score does in statistics — it lets you compare apples and oranges by expressing each value in units of "how many standard deviations away from typical." A student scoring 80 on an easy exam and 60 on a hard exam might both be one standard deviation above the class average once standardised.
+
+---
+
+### AR(1) process on the standardised residuals
+
+**Initial condition** (Day 1):
+
+$$\eta_1 \sim \mathcal{N}(0,\ 1)$$
+
+**Every subsequent day:**
+
+$$\eta_t = \phi \cdot \eta_{t-1} + \xi_t, \qquad \xi_t \sim \mathcal{N}(0,\ 1-\phi^2)$$
+
+Even after removing the flow-dependence above, the residuals are not independent across time. If the model underpredicts today's flow, it tends to underpredict tomorrow's too — because the processes driving the error (soil moisture state, snowmelt timing, rating curve bias) persist over multiple days. The AR(1) model captures this memory. Each day's standardised error is a weighted blend of yesterday's error (the $\phi \cdot \eta_{t-1}$ term) and a fresh random shock (the $\xi_t$ term).
+
+Think of a weather forecaster who is systematically overestimating temperature during a warm spell. The bias does not disappear overnight — it persists until the weather pattern changes. The $\phi$ parameter measures how long that bias lingers. If $\phi = 0.8$, then 80% of today's forecasting error is inherited from yesterday.
+
+| Symbol | Meaning |
+|--------|---------|
+| $\phi$ | Memory coefficient — how much of yesterday's error carries into today |
+| $\xi_t$ | Fresh random shock added each day |
+| $1 - \phi^2$ | Variance of the fresh shock (ensures total variance stays = 1) |
+
+---
+
+### Innovation standard deviation
+
+$$\sigma_{\text{wn}} = \sqrt{1 - \phi^2}$$
+
+This is the standard deviation of the fresh random shock $\xi_t$ added at each time step. Its size is not a free parameter — it is determined entirely by $\phi$ in order to keep the total variance of $\eta_t$ equal to 1. The stronger the memory (large $\phi$), the smaller the fresh shock needs to be, because most of the variation is already being carried forward from yesterday.
+
+Imagine a bucket being filled from two taps simultaneously — one tap carries yesterday's water forward, and the other adds fresh water. If the first tap is running fast (high $\phi$), the second tap must run slowly to avoid overfilling the bucket. The two taps together always produce exactly one bucketful of variance.
+
+---
+
+### Reverse standardisation (scaling noise back to flow units)
+
+$$\varepsilon_t = \sigma_{\varepsilon}(t) \cdot \eta_t$$
+
+This is simply the inverse of the standardised residual formula. We computed unit-variance noise $\eta_t$ via the AR(1) process, but we need to convert it back into actual flow units before adding it to the simulation. Multiplying by $\sigma_{\varepsilon}(t)$ restores the flow-dependent scale — the same unit noise score gets amplified more on a high-flow day than on a low-flow day.
+
+Converting a z-score back into raw marks requires multiplying by the class standard deviation. Here we multiply the standardised noise back by the flow-dependent standard deviation to recover noise in m³/s.
+
+---
+
+### Predictive sample (always positive)
+
+$$\log(Q_{\text{pred},t}) = \log(Q_{\text{sim},t}) + \varepsilon_t$$
+
+$$\boxed{Q_{\text{pred},t} = Q_{\text{sim},t} \cdot e^{\,\varepsilon_t}}$$
+
+Rather than adding noise directly to the simulated flow (which risks producing negative values), we add noise in log-space and then exponentiate. Because $e^x$ is strictly positive for every real number $x$, the result can never be negative or zero — a physical requirement for streamflow. The second line shows the equivalent statement in original units: the prediction is the simulation multiplied by a random positive factor $e^{\varepsilon_t}$. When $\varepsilon_t > 0$ the noise pushes the prediction above the simulation; when $\varepsilon_t < 0$ it pushes it below — but in both cases the result remains positive.
+
+Think of adjusting a salary by a percentage rather than a fixed amount. Adding or subtracting a percentage can never make the salary negative, whereas adding or subtracting a fixed dollar amount could in principle produce a negative number if the starting salary were small enough.
+
+---
+
+### Summary: how the three parameters connect
+
+$$Q_{\text{pred},t} = Q_{\text{sim},t} \cdot \exp\!\Big(\underbrace{(a \cdot \log Q_{\text{sim},t} + b)}_{\sigma_{\varepsilon}(t)} \cdot \underbrace{\eta_t}_{\text{AR(1) noise}}\Big)$$
+
+*The predicted flow equals the simulated flow, multiplied by a random factor whose size depends on both the flow magnitude (through $\sigma_{\varepsilon}(t)$) and a temporally correlated noise process (through $\eta_t$).*
+
+The three noise parameters each control a distinct and separable aspect of the uncertainty structure:
+
+| Parameter | Controls | Practical question it answers |
+|-----------|----------|-------------------------------|
+| $b$ | Overall noise floor | How uncertain are we even on calm, low-flow days? |
+| $a$ | Noise growth rate with flow | How much more uncertain do we get as flows rise? |
+| $\phi$ | Temporal correlation of errors | How long do errors persist before the model self-corrects? |
+
+
+
+
 ### 6.3.1 GR4J Model with Gaussian Homoscedastic and Non-correlated Errors
 ```r
 # =============================================================================
