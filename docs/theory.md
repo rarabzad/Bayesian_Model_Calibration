@@ -113,6 +113,17 @@
     * [Advanced Diagnostic: Recursive Residuals](#advanced-diagnostic-recursive-residuals)
     * [Residual Diagnostics in Model Selection](#residual-diagnostics-in-model-selection)
     * [Summary: Iterative Refinement](#summary-iterative-refinement)---
+* [6. Complete Workflows](#6-Complete-Workflows)
+  * [6.1 GR4J Model with Gaussian Homoscedastic and Non-correlated Errors](#61-GR4J-Model-with-Gaussian-Homoscedastic-and-Non-correlated-Errors)
+    * [6.1.1 Parameter list and interpretation](#611-Parameter-list-and-interpretation)
+    * [6.1.2 Full inference/post inefernce setup](#612-Full-inference/post-inefernce-setup)
+  * [6.2 GR4J Model with Gaussian Heteroscedastic and AR(1) Autocorrelated Errors](#62-GR4J-Model-with-Gaussian-Heteroscedastic-and-AR(1)-Autocorrelated-Errors)
+    * [6.2.1 Parameter list and interpretation](#621-Parameter-list-and-interpretation)
+    * [6.2.2 Full inference/post inefernce setup](#622-Full-inference/post-inefernce-setup)
+  * [6.3 GR4J Model inference (negative flow treatment)](#63-GR4J-Model-inference-(negative-flow-treatment))
+    * [6.3.1 GR4J Model with Gaussian Homoscedastic and Non-correlated Errors](#631-GR4J-Model-with-Gaussian-Homoscedastic-and-Non-correlated-Errors)
+    * [6.3.2 GR4J Model with Gaussian Heteroscedastic and AR(1) Autocorrelated Errors](#632-GR4J-Model-with-Gaussian-Heteroscedastic-and-AR(1)-Autocorrelated-Errors)
+
 
 # 1. Introduction
 
@@ -4465,7 +4476,7 @@ Residual diagnostics are not a one-time check but part of an **iterative model d
 | Temperature split | **TT** | Threshold for rain/snow split in degree‑day module | °C |
 | Degree‑day factor | **DDF** | Melt rate per °C above TT | mm °C⁻¹ day⁻¹ |
 | Residual SD **(error model)** | **σ** | Standard deviation of observation‑model residuals | m³/s |
-### 6.2.2 Full inference/post inefernce setup
+### 6.1.2 Full inference/post inefernce setup
 ```r
 ###################################################################################
 ### PART 1: LOAD LIBRARIES ########################################################
@@ -4824,8 +4835,8 @@ cat("90% Credible Interval Coverage:", round(coverage_90, 3), "\n")
 ###################################################################################
 ```
 
-## 6.3 GR4J Model with Gaussian Heteroscedastic and AR(1) Autocorrelated Errors
-### 6.3.1 Parameter list and interpretation
+## 6.2 GR4J Model with Gaussian Heteroscedastic and AR(1) Autocorrelated Errors
+### 6.2.1 Parameter list and interpretation
 | **Parameter** | **Symbol** | **Meaning** | **Units** |
 |---------------|------------|-------------|-----------|
 | Production store capacity | **X1** | Controls partitioning between evapotranspiration and runoff generation | mm |
@@ -4838,7 +4849,7 @@ cat("90% Credible Interval Coverage:", round(coverage_90, 3), "\n")
 | Residual SD b **(error model)** | **b** | Standard deviation of observation‑model residuals | - |
 | Residual autocorrelation **(error model)** | **φ** | Standard deviation of observation‑model residuals | - |
 
-### 6.3.2 Full inference/post inefernce setup
+### 6.2.2 Full inference/post inefernce setup
 ```r
 ###################################################################################
 ### PART 1: LOAD LIBRARIES ########################################################
@@ -5275,6 +5286,1797 @@ cat("90% Credible Interval Coverage:", round(coverage_90, 3), "\n")
 ###################################################################################
 ### END OF SCRIPT #################################################################
 ###################################################################################
+```
+## 6.3 GR4J Model inference (negative flow treatment)
+### 6.3.1 GR4J Model with Gaussian Homoscedastic and Non-correlated Errors
+```r
+# =============================================================================
+# BAYESIAN CALIBRATION OF GR4J — CASE 1: HOMOSCEDASTIC GAUSSIAN ERRORS
+# =============================================================================
+#
+# PURPOSE:
+#   This script calibrates the GR4J rainfall-runoff model using Bayesian
+#   inference with a homoscedastic Gaussian likelihood. "Homoscedastic" means
+#   the residual standard deviation (sigma) is assumed CONSTANT across all
+#   flow magnitudes — the same sigma applies whether flows are 0.1 m³/s or
+#   100 m³/s. This is the simplest possible error assumption.
+#
+# KEY DESIGN DECISION — AVOIDING NEGATIVE PREDICTIONS:
+#   A naive Gaussian predictive draw (Q_pred = Q_sim + rnorm(sigma)) can
+#   produce negative flows, which are physically impossible. We avoid this
+#   by drawing predictive samples in LOG-SPACE using a log-normal
+#   distribution. This means:
+#     log(Q_obs) ~ N(log(Q_sim), sigma_log^2)
+#   where sigma_log is a dimensionless relative-error parameter. Predictions
+#   are then exp(...), which is always strictly positive.
+#
+# WORKFLOW OVERVIEW:
+#   Step 1  — Install and load packages
+#   Step 2  — Load data and GR4J simulator
+#   Step 3  — Define parameter bounds (prior support)
+#   Step 4  — Define the log-prior function
+#   Step 5  — Define the log-likelihood function (log-normal)
+#   Step 6  — Define the log-posterior function
+#   Step 7  — Run adaptive MCMC (two-phase: burn-in tuning + main sampling)
+#   Step 8  — Post-processing: discard burn-in, name columns
+#   Step 9  — MCMC convergence diagnostics
+#   Step 10 — Posterior summary statistics
+#   Step 11 — Generate posterior predictive samples (NO negatives)
+#   Step 12 — Visualise: time-series bands, spaghetti, flow duration curves
+#   Step 13 — Coverage statistics and performance metrics (NSE, KGE)
+#   Step 14 — Residual diagnostics
+#
+# MODEL PARAMETERS (total = 7):
+#   Hydrological (6): X1, X2, X3, X4, TT, DDF
+#   Error model  (1): sigma_log  [log-space residual SD, dimensionless]
+#
+# UNITS:
+#   Precipitation / PET : mm day⁻¹
+#   Temperature         : °C
+#   Streamflow          : m³ s⁻¹
+#   sigma_log           : dimensionless (log-scale relative error)
+#
+# AUTHORS : Adapted from Bayesian Calibration for Hydrologists course notes
+# =============================================================================
+
+
+# =============================================================================
+# STEP 1: INSTALL AND LOAD REQUIRED PACKAGES
+# =============================================================================
+
+# List of all packages needed for this workflow
+required_packages <- c(
+  "xts",        # eXtensible Time Series: date-indexed time series objects
+  "zoo",        # Ordered observations; underpins xts
+  "adaptMCMC",  # Adaptive Metropolis MCMC sampler (Haario et al. 2001)
+  "airGR",      # GR4J hydrological model implementation
+  "coda"        # MCMC diagnostics: traceplot, ESS, Gelman-Rubin
+)
+
+# Install any missing packages automatically
+missing_pkg <- required_packages[
+  !(required_packages %in% installed.packages()[, "Package"])
+]
+if (length(missing_pkg) > 0) {
+  message("Installing missing packages: ", paste(missing_pkg, collapse = ", "))
+  install.packages(missing_pkg)
+}
+
+# Load all packages, suppressing verbose startup messages
+suppressPackageStartupMessages({
+  library(xts)
+  library(zoo)
+  library(adaptMCMC)
+  library(airGR)
+  library(coda)
+})
+
+cat("=== All packages loaded successfully ===\n\n")
+
+
+# =============================================================================
+# STEP 2: LOAD DATA AND GR4J SIMULATOR
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# 2a. Load the GR4J simulator function from GitHub
+#     gr4j_sim() wraps airGR's RunModel_GR4J and returns an xts of Q (m³/s)
+# ---------------------------------------------------------------------------
+source(paste0(
+  "https://raw.githubusercontent.com/rarabzad/",
+  "Bayesian_Model_Calibration/refs/heads/main/docs/gr4j_sim.R"
+))
+cat("GR4J simulator loaded from GitHub.\n")
+
+# ---------------------------------------------------------------------------
+# 2b. Load the example basin dataset bundled with airGR
+#     L0123001 contains daily P, PET, T, and observed Q for a French catchment
+# ---------------------------------------------------------------------------
+data(L0123001)
+
+# BasinObs is a data.frame with columns: DatesR, P, E (PET), T, Qls
+# BasinInfo holds metadata including catchment area in km²
+
+# Create xts (eXtensible Time Series) objects.
+# xts stores data WITH its time index, which makes merging two series on
+# matching dates very easy later — critical when NA gaps exist in observations.
+
+P_xts   <- xts(BasinObs$P,          # Precipitation [mm/day]
+               order.by = as.Date(BasinObs$DatesR))
+
+PET_xts <- xts(BasinObs$E,          # Potential evapotranspiration [mm/day]
+               order.by = as.Date(BasinObs$DatesR))
+
+T_xts   <- xts(BasinObs$T,          # Air temperature [°C]
+               order.by = as.Date(BasinObs$DatesR))
+
+# Observed discharge: convert from L/s → m³/s by dividing by 1000
+Q_obs_xts <- xts(BasinObs$Qls / 1000,
+                 order.by = as.Date(BasinObs$DatesR))
+
+# Basin area: needed by gr4j_sim to convert mm/day → m³/s
+area_km2 <- BasinInfo$BasinArea
+
+cat(sprintf(
+  "Data loaded: %d days (%s to %s), basin area = %.1f km²\n\n",
+  nrow(BasinObs),
+  format(start(P_xts), "%Y-%m-%d"),
+  format(end(P_xts),   "%Y-%m-%d"),
+  area_km2
+))
+
+
+# =============================================================================
+# STEP 3: DEFINE PARAMETER BOUNDS (SUPPORT OF THE PRIOR)
+# =============================================================================
+#
+# We use uniform priors — parameters are equally likely anywhere within
+# their physically plausible ranges, and have ZERO probability outside.
+# These bounds encode hard physical constraints (e.g., X1 must be positive).
+#
+# ┌─────────────┬──────────────────────────────────────────────────────────┐
+# │ Parameter   │ Physical meaning & rationale for bounds                 │
+# ├─────────────┼──────────────────────────────────────────────────────────┤
+# │ X1 (mm)     │ Production store capacity. Controls how much water the  │
+# │             │ soil can hold before generating runoff. [1e-3, 1000]:   │
+# │             │ shallow urban soils → deep permeable catchments.        │
+# │ X2 (-)      │ Groundwater exchange coefficient. Negative = loss to    │
+# │             │ deep aquifer; positive = gain from adjacent basins.     │
+# │             │ [-3, 3] covers most observed exchange behaviours.       │
+# │ X3 (mm)     │ Routing store capacity. Controls baseflow recession     │
+# │             │ rate and low-flow duration. [1e-3, 500].                │
+# │ X4 (days)   │ Unit hydrograph time-base. Determines lag between       │
+# │             │ rainfall and peak runoff. [0.1, 10] days.               │
+# │ TT (°C)     │ Temperature threshold: rain/snow split. [-20, 10] °C   │
+# │             │ covers polar to warm-temperate climates.                │
+# │ DDF(mm/°C/d)│ Degree-day snowmelt factor. [1e-3, 10] mm °C⁻¹ day⁻¹.│
+# │ sigma_log(-) │ Log-space residual SD. Dimensionless relative error.  │
+# │             │ 0.01 = ~1% error; 1.0 = very large uncertainty.        │
+# └─────────────┴──────────────────────────────────────────────────────────┘
+
+# --- Hydrological parameter bounds ---
+lb_hydro <- c(1e-3,  -3,   1e-3,  0.1,  -20,   1e-3)  # lower
+ub_hydro <- c(1000,   3,   500,   10,    10,   10  )   # upper
+
+# --- Error model parameter bounds ---
+# sigma_log: log-space residual standard deviation
+# Upper bound: 99th-percentile observed flow divided by median, then log
+# This gives a physically sensible maximum relative error
+Q_obs_vec <- as.numeric(Q_obs_xts)
+Q_obs_vec <- Q_obs_vec[!is.na(Q_obs_vec) & Q_obs_vec > 0]
+
+lb_resid <- c(1e-4)                     # near-zero lower bound
+ub_resid <- c(log(quantile(Q_obs_vec, 0.99) /   # generous but finite upper
+                    quantile(Q_obs_vec, 0.10)))
+
+# Combine into single vectors used throughout the script
+lb <- c(lb_hydro, lb_resid)
+ub <- c(ub_hydro, ub_resid)
+
+# Parameter names (used for labelling plots and posterior summaries)
+param_names <- c("X1", "X2", "X3", "X4", "TT", "DDF", "sigma_log")
+n_params    <- length(lb)   # total number of parameters = 7
+
+cat(sprintf("Parameter space: %d parameters\n", n_params))
+cat("Lower bounds:", paste(round(lb, 4), collapse = ", "), "\n")
+cat("Upper bounds:", paste(round(ub, 4), collapse = ", "), "\n\n")
+
+
+# =============================================================================
+# STEP 4: LOG-PRIOR FUNCTION
+# =============================================================================
+#
+# The prior encodes what we know BEFORE seeing data.
+# We use independent uniform priors: each parameter is equally likely
+# anywhere in [lb_i, ub_i] and impossible outside.
+#
+# log p(θ) = Σ log Uniform(θ_i; lb_i, ub_i)
+#           = Σ [ -log(ub_i - lb_i) ]   if all θ_i in bounds
+#           = -Inf                        otherwise
+#
+# Working in log-space avoids numerical underflow from multiplying many
+# small probabilities, and is required by the MCMC acceptance ratio.
+
+log_prior <- function(theta) {
+  
+  # Hard boundary check: return -Inf (= probability 0) if any parameter
+  # falls outside its allowed range. This prevents physically impossible
+  # parameter combinations from ever being accepted.
+  if (any(theta < lb) | any(theta > ub)) return(-Inf)
+  
+  # Sum of log-uniform densities for each parameter.
+  # dunif(..., log=TRUE) = -log(ub - lb) for values inside the range.
+  # The sum of logs equals the log of the product (joint density under
+  # independence assumption).
+  return(sum(dunif(theta, min = lb, max = ub, log = TRUE)))
+}
+
+
+# =============================================================================
+# STEP 5: LOG-LIKELIHOOD FUNCTION  (Log-normal; avoids negative predictions)
+# =============================================================================
+#
+# STATISTICAL MODEL:
+#   log(Q_obs_t) ~ Normal( log(Q_sim_t), sigma_log² )
+#
+# This is equivalent to:
+#   Q_obs_t = Q_sim_t * exp(epsilon_t),  epsilon_t ~ N(0, sigma_log²)
+#
+# WHY LOG-NORMAL?
+#   1. Physically sound: Q is strictly positive by construction.
+#   2. Multiplicative errors: relative errors (%) are constant across
+#      flow magnitudes — a natural assumption for streamflow.
+#   3. Skewness handling: high flows have larger absolute residuals in
+#      original space, consistent with observations.
+#   4. Prevents negative predictions in the PPC step.
+#
+# LIKELIHOOD FORMULA:
+#   For observed Q_obs_t > 0:
+#   log p(Q_obs_t | theta) = log f_lognorm(Q_obs_t; log(Q_sim_t), sigma_log)
+#                          = -log(Q_obs_t) - log(sigma_log)
+#                            - 0.5*log(2π)
+#                            - [log(Q_obs_t) - log(Q_sim_t)]² / (2*sigma_log²)
+#
+# The function dlnorm() in R computes exactly this density.
+
+log_likelihood <- function(theta) {
+  
+  # --- Extract parameters from vector ---
+  hydro_params <- theta[1:6]   # GR4J model parameters [X1,X2,X3,X4,TT,DDF]
+  sigma_log    <- theta[7]     # Log-space residual standard deviation
+  
+  # sigma_log must be strictly positive (it is a standard deviation)
+  if (sigma_log <= 0) return(-Inf)
+  
+  # --- Run GR4J model to get simulated streamflow ---
+  # gr4j_sim() returns an xts object of simulated daily Q in m³/s
+  Q_sim_xts <- tryCatch(
+    gr4j_sim(P_xts, T_xts, PET_xts, hydro_params, area_km2),
+    error = function(e) return(NULL)
+  )
+  if (is.null(Q_sim_xts)) return(-Inf)
+  
+  # --- Align simulated and observed flows on matching dates ---
+  # merge() with all=FALSE keeps only dates present in BOTH series.
+  # This automatically handles:
+  #   - Different start/end dates between sim and obs
+  #   - Missing observation dates (NA gaps)
+  merged <- merge(Q_sim_xts, Q_obs_xts, all = FALSE)
+  
+  # Remove any remaining rows with NA in either column
+  # (e.g., days where PET or P data were missing → sim produced NA)
+  merged <- merged[!apply(is.na(merged), 1, any), ]
+  
+  Q_sim <- as.numeric(merged[, 1])   # simulated flows
+  Q_obs <- as.numeric(merged[, 2])   # observed flows
+  
+  # Need at least a few valid observations to compute a meaningful likelihood
+  if (length(Q_obs) < 10) return(-Inf)
+  
+  # --- Guard: log-normal requires strictly positive values ---
+  # If simulator produces zero or negative flows (can happen with extreme
+  # parameters), clamp to a tiny positive floor before taking log.
+  Q_sim <- pmax(Q_sim, 1e-9)
+  
+  # Also skip any observed zero-flow days (log(0) = -Inf → NaN in likelihood)
+  valid <- Q_obs > 0
+  Q_sim <- Q_sim[valid]
+  Q_obs <- Q_obs[valid]
+  if (length(Q_obs) < 10) return(-Inf)
+  
+  # --- Compute log-likelihood ---
+  # dlnorm(x, meanlog, sdlog, log=TRUE) gives:
+  #   log p(x) = -log(x) - log(sdlog) - 0.5*log(2π)
+  #              - [log(x)-meanlog]² / (2*sdlog²)
+  # Here meanlog = log(Q_sim), sdlog = sigma_log
+  ll <- sum(dlnorm(Q_obs,
+                   meanlog = log(Q_sim),
+                   sdlog   = sigma_log,
+                   log     = TRUE))
+  
+  # Return -Inf for any numerical pathology (NaN, NA)
+  if (!is.finite(ll)) return(-Inf)
+  
+  return(ll)
+}
+
+
+# =============================================================================
+# STEP 6: LOG-POSTERIOR FUNCTION
+# =============================================================================
+#
+# Bayes' theorem in log-space:
+#   log p(θ | data) = log p(data | θ) + log p(θ) + const
+#
+# The normalising constant [log p(data)] is the same for all θ, so it does
+# not affect which parameter values are preferred. The MCMC acceptance ratio
+# uses differences of log-posteriors, so the constant cancels out exactly.
+# We therefore never need to compute it.
+
+log_posterior <- function(theta) {
+  
+  # Evaluate prior FIRST — if theta is outside bounds the prior returns -Inf,
+  # and we avoid the (expensive) model run entirely.
+  lp <- log_prior(theta)
+  if (!is.finite(lp)) return(-Inf)
+  
+  # Evaluate likelihood (runs GR4J model)
+  ll <- log_likelihood(theta)
+  
+  # Sum in log-space = product in probability space
+  return(lp + ll)
+}
+
+
+# =============================================================================
+# STEP 7: ADAPTIVE MCMC SAMPLING — TWO-PHASE STRATEGY
+# =============================================================================
+#
+# We use the Adaptive Metropolis algorithm from the adaptMCMC package.
+# The algorithm automatically tunes the proposal covariance matrix during
+# sampling to achieve a target acceptance rate (~23% for random-walk MH).
+#
+# TWO-PHASE DESIGN:
+#   Phase 1 (burn-in):  Short run (2000 iter) with a high acceptance target
+#                       (50%) to quickly explore the posterior and learn the
+#                       covariance structure of the parameters.
+#   Phase 2 (main run): Longer run (10000 iter) using the learned covariance
+#                       as the initial proposal, targeting the optimal 23.4%.
+#
+# WHY 23.4%?
+#   For a d-dimensional Gaussian target with random-walk Metropolis, the
+#   theoretically optimal acceptance rate is 23.4% (Roberts et al. 1997).
+#   This balances step size (too small = slow exploration; too large = most
+#   proposals rejected and chain gets stuck).
+
+# ---------------------------------------------------------------------------
+# 7a. Set initial parameter values
+#     Use the midpoint of each parameter's range as the starting point.
+#     This is usually in a moderate-probability region, reducing burn-in.
+# ---------------------------------------------------------------------------
+theta_init <- (lb + ub) / 2
+
+# Initial proposal scales: 2% of each parameter's range.
+# adaptMCMC will refine these during Phase 1.
+scale_init <- pmax((ub - lb) * 0.02, 0.01)  # ensure all > 0
+
+cat("=== Phase 1: Burn-in run (2000 iterations, acc.rate=0.5) ===\n")
+set.seed(20122023)   # set seed for full reproducibility
+
+burnin_result <- MCMC(
+  p        = log_posterior,  # function returning log-posterior density
+  init     = theta_init,     # starting parameter vector
+  scale    = scale_init,     # initial diagonal proposal covariance
+  n        = 2000,           # number of MCMC iterations
+  adapt    = TRUE,           # enable adaptive tuning of proposal
+  acc.rate = 0.5             # high target during exploration phase
+)
+
+cat(sprintf("Phase 1 acceptance rate: %.3f\n\n",
+            burnin_result$acceptance.rate))
+
+# ---------------------------------------------------------------------------
+# 7b. Extract the learned proposal covariance matrix from Phase 1.
+#     cov.jump is a full (n_params × n_params) covariance matrix that
+#     captures both individual parameter scales AND correlations between
+#     parameters discovered during burn-in. Using the full matrix in Phase 2
+#     significantly improves mixing compared to a diagonal proposal.
+# ---------------------------------------------------------------------------
+tuned_cov <- burnin_result$cov.jump
+
+cat("=== Phase 2: Main MCMC run (10000 iterations, acc.rate=0.234) ===\n")
+set.seed(20122023)
+
+mcmc_result <- MCMC(
+  p        = log_posterior,  # same target distribution
+  init     = theta_init,     # restart from same initial point
+  # (burn-in samples discarded anyway)
+  scale    = tuned_cov,      # use full covariance learned in Phase 1
+  n        = 10000,          # main sampling run
+  adapt    = TRUE,           # continue adapting (helps with remaining
+  # non-stationarity early in the chain)
+  acc.rate = 0.234           # optimal acceptance rate for high dimensions
+)
+
+cat(sprintf("Phase 2 acceptance rate: %.3f\n", mcmc_result$acceptance.rate))
+cat("MCMC sampling complete.\n\n")
+
+
+# =============================================================================
+# STEP 8: POST-PROCESSING — DISCARD BURN-IN, LABEL COLUMNS
+# =============================================================================
+#
+# Early MCMC samples are drawn while the chain is still moving from its
+# (arbitrary) starting point toward the high-probability region of the
+# posterior. These "burn-in" samples do NOT represent the target distribution
+# and must be discarded before computing any posterior statistics.
+#
+# Rule of thumb: discard at least 50% of a 10000-iteration chain for safety.
+# Monitor trace plots (Step 9) to confirm the chain has stabilised.
+
+burn_in <- 5000   # discard first 5000 iterations (50% of chain)
+
+# Extract the retained samples as a plain matrix
+samples <- mcmc_result$samples[(burn_in + 1):nrow(mcmc_result$samples), ]
+
+# Assign meaningful column names for all downstream plots and tables
+colnames(samples) <- param_names
+
+n_retained <- nrow(samples)
+cat(sprintf("Retained %d samples after discarding %d burn-in iterations.\n\n",
+            n_retained, burn_in))
+
+
+# =============================================================================
+# STEP 9: MCMC CONVERGENCE DIAGNOSTICS
+# =============================================================================
+#
+# These diagnostics help confirm that the chain has converged to the
+# stationary distribution (the posterior) and that we have enough
+# independent-equivalent samples for reliable inference.
+
+# Convert to coda mcmc object — enables coda's diagnostic functions
+samples_mcmc <- as.mcmc(samples)
+
+# ---------------------------------------------------------------------------
+# 9a. Trace plots: parameter values vs iteration
+#     A well-converged chain looks like a "fuzzy caterpillar" — stationary
+#     mean and variance, no trends, no long stuck periods.
+# ---------------------------------------------------------------------------
+cat("--- Diagnostic: Trace plots ---\n")
+par(mfrow = c(4, 2), mar = c(3, 3, 2, 1), mgp = c(2, 0.7, 0))
+for (j in seq_len(n_params)) {
+  plot(samples[, j], type = "l", col = "steelblue",
+       xlab = "Iteration (post burn-in)", ylab = param_names[j],
+       main = paste("Trace:", param_names[j]))
+  # Horizontal line at posterior mean for reference
+  abline(h = mean(samples[, j]), col = "red", lty = 2, lwd = 1.5)
+}
+par(mfrow = c(1, 1))
+
+# ---------------------------------------------------------------------------
+# 9b. Effective Sample Size (ESS)
+#     MCMC samples are autocorrelated, so N samples contain less information
+#     than N independent draws. ESS estimates the equivalent number of
+#     independent samples.
+#     ESS = N / [1 + 2 * Σ autocorrelations]
+#     Rule of thumb: ESS > 200 for each parameter is the minimum; > 1000
+#     gives reliable credible interval estimates.
+# ---------------------------------------------------------------------------
+ess_vals <- effectiveSize(samples_mcmc)
+cat("\nEffective Sample Sizes (ESS):\n")
+print(round(ess_vals))
+cat(sprintf("Minimum ESS: %.0f  (target: > 200, ideally > 1000)\n\n",
+            min(ess_vals)))
+
+# ---------------------------------------------------------------------------
+# 9c. Autocorrelation plots
+#     Should decay rapidly toward zero within ~20 lags for good mixing.
+# ---------------------------------------------------------------------------
+par(mfrow = c(3, 3), mar = c(3, 3, 2, 1))
+for (j in seq_len(n_params)) {
+  acf(samples[, j], lag.max = 40, main = paste("ACF:", param_names[j]),
+      col = "steelblue")
+}
+par(mfrow = c(1, 1))
+
+
+# =============================================================================
+# STEP 10: POSTERIOR SUMMARY STATISTICS
+# =============================================================================
+
+cat("=== Posterior Summary ===\n")
+
+post_mean   <- colMeans(samples)
+post_median <- apply(samples, 2, median)
+post_sd     <- apply(samples, 2, sd)
+post_ci95   <- apply(samples, 2, quantile, probs = c(0.025, 0.975))
+
+# Assemble into a readable data frame
+summary_df <- data.frame(
+  Parameter = param_names,
+  Mean      = round(post_mean,   4),
+  Median    = round(post_median, 4),
+  SD        = round(post_sd,     4),
+  CI_2.5    = round(post_ci95[1, ], 4),
+  CI_97.5   = round(post_ci95[2, ], 4),
+  row.names = NULL
+)
+print(summary_df)
+
+# ---------------------------------------------------------------------------
+# Marginal posterior density plots overlaid with prior (uniform = flat line)
+# ---------------------------------------------------------------------------
+par(mfrow = c(3, 3), mar = c(4, 3, 2, 1))
+for (j in seq_len(n_params)) {
+  # Posterior density
+  d <- density(samples[, j])
+  plot(d, col = "steelblue", lwd = 2,
+       main = paste("Posterior:", param_names[j]),
+       xlab = param_names[j], ylab = "Density")
+  
+  # Shade the 95% credible interval
+  ci <- post_ci95[, j]
+  in_ci <- d$x >= ci[1] & d$x <= ci[2]
+  polygon(c(d$x[in_ci], rev(d$x[in_ci])),
+          c(d$y[in_ci], rep(0, sum(in_ci))),
+          col = rgb(0.27, 0.51, 0.71, 0.3), border = NA)
+  
+  # Vertical line at posterior mean
+  abline(v = post_mean[j], col = "red", lty = 2, lwd = 1.5)
+  legend("topright", legend = c("Posterior", "Mean", "95% CI"),
+         col = c("steelblue", "red", rgb(0.27,0.51,0.71,0.5)),
+         lty = c(1, 2, NA), lwd = c(2, 1.5, NA),
+         fill = c(NA, NA, rgb(0.27,0.51,0.71,0.3)),
+         border = c(NA, NA, NA), cex = 0.7, bty = "n")
+}
+par(mfrow = c(1, 1))
+
+# ---------------------------------------------------------------------------
+# Pairwise scatter plots to reveal parameter correlations
+# Strongly correlated parameters (off-diagonal ellipses) indicate that they
+# cannot be estimated independently — a sign of structural non-identifiability
+# ---------------------------------------------------------------------------
+pairs(samples,
+      pch   = 19,
+      col   = rgb(0, 0, 1, 0.08),
+      cex   = 0.4,
+      main  = "Joint Posterior Distributions (Case 1: Homoscedastic)",
+      labels = param_names)
+
+
+# =============================================================================
+# STEP 11: GENERATE POSTERIOR PREDICTIVE SAMPLES  (NO NEGATIVE FLOWS)
+# =============================================================================
+#
+# POSTERIOR PREDICTIVE DISTRIBUTION:
+#   p(Q_new | data) = ∫ p(Q_new | θ) · p(θ | data) dθ
+#
+# We approximate this integral by Monte Carlo:
+#   1. Draw θ⁽ⁱ⁾ from the posterior (already have MCMC samples).
+#   2. Run GR4J with θ⁽ⁱ⁾ to get Q_sim⁽ⁱ⁾.
+#   3. Draw Q_pred⁽ⁱ⁾ from the LIKELIHOOD: log(Q_pred) ~ N(log(Q_sim), σ²_log).
+#
+# Step 3 uses exp(rnorm(log(Q_sim), sigma_log)) which is ALWAYS > 0.
+# This is consistent with the log-normal likelihood used for calibration.
+#
+# n_pred: use a moderately large number (200) for smooth uncertainty bands.
+# Computing more posterior predictive samples improves band smoothness but
+# increases runtime linearly.
+
+n_pred   <- 200
+pred_idx <- sample(seq_len(n_retained), n_pred, replace = FALSE)
+
+# Get the time axis by running model once with first parameter set
+Q_sim_ref <- gr4j_sim(P_xts, T_xts, PET_xts, samples[1, 1:6], area_km2)
+merged_ref <- merge(Q_sim_ref, Q_obs_xts, all = FALSE)
+merged_ref <- merged_ref[!apply(is.na(merged_ref), 1, any), ]
+time_index <- index(merged_ref)
+n_timesteps <- length(time_index)
+Q_obs_aligned <- as.numeric(merged_ref[, 2])
+
+# Pre-allocate matrix: rows = posterior draws, columns = time steps
+# Each row is one complete hydrograph realisation
+Q_pred_matrix <- matrix(NA_real_, nrow = n_pred, ncol = n_timesteps)
+
+cat(sprintf("Generating %d posterior predictive samples...\n", n_pred))
+
+for (i in seq_len(n_pred)) {
+  
+  theta_i      <- samples[pred_idx[i], ]
+  hydro_params <- theta_i[1:6]
+  sigma_log_i  <- theta_i[7]
+  
+  # Run deterministic GR4J simulation
+  Q_sim_xts_i <- gr4j_sim(P_xts, T_xts, PET_xts, hydro_params, area_km2)
+  
+  # Align with observations on common dates
+  merged_i <- merge(Q_sim_xts_i, Q_obs_xts, all = FALSE)
+  merged_i <- merged_i[!apply(is.na(merged_i), 1, any), ]
+  Q_sim_i  <- pmax(as.numeric(merged_i[, 1]), 1e-9)  # floor at tiny positive
+  
+  # --- KEY STEP: sample in log-space, then exponentiate ---
+  # log(Q_pred) ~ N(log(Q_sim), sigma_log²)
+  # exp(...) maps back to strictly positive flow values.
+  log_Q_pred <- rnorm(n = length(Q_sim_i),
+                      mean = log(Q_sim_i),
+                      sd   = sigma_log_i)
+  
+  Q_pred_matrix[i, seq_along(log_Q_pred)] <- exp(log_Q_pred)
+}
+
+# Sanity check: confirm no negatives (should always pass with log-normal)
+n_negative <- sum(Q_pred_matrix < 0, na.rm = TRUE)
+cat(sprintf("Negative flow values in predictive samples: %d (should be 0)\n\n",
+            n_negative))
+
+# ---------------------------------------------------------------------------
+# Compute summary statistics across posterior predictive ensemble
+# ---------------------------------------------------------------------------
+Q_mean_pred    <- colMeans(Q_pred_matrix, na.rm = TRUE)
+Q_median_pred  <- apply(Q_pred_matrix, 2, median, na.rm = TRUE)
+Q_lower_50     <- apply(Q_pred_matrix, 2, quantile, probs = 0.25, na.rm = TRUE)
+Q_upper_50     <- apply(Q_pred_matrix, 2, quantile, probs = 0.75, na.rm = TRUE)
+Q_lower_90     <- apply(Q_pred_matrix, 2, quantile, probs = 0.05, na.rm = TRUE)
+Q_upper_90     <- apply(Q_pred_matrix, 2, quantile, probs = 0.95, na.rm = TRUE)
+
+
+# =============================================================================
+# STEP 12: VISUALISE POSTERIOR PREDICTIVE CHECK (PPC)
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# 12a. Time-series plot with shaded uncertainty bands
+# ---------------------------------------------------------------------------
+par(mfrow = c(1, 1), mar = c(4, 4, 3, 1))
+
+y_max <- max(c(Q_obs_aligned, Q_upper_90), na.rm = TRUE) * 1.05
+
+plot(time_index, Q_obs_aligned, type = "n",
+     ylim = c(0, y_max),
+     xlab = "Date", ylab = "Discharge (m³/s)",
+     main = "Case 1 (Homoscedastic Log-normal): Posterior Predictive Check")
+
+# 90% credible band — light colour, covers wide range of parameter uncertainty
+polygon(c(time_index, rev(time_index)),
+        c(Q_lower_90, rev(Q_upper_90)),
+        col = rgb(0.4, 0.6, 0.9, 0.25), border = NA)
+
+# 50% credible band — darker, tighter "most likely" range
+polygon(c(time_index, rev(time_index)),
+        c(Q_lower_50, rev(Q_upper_50)),
+        col = rgb(0.4, 0.6, 0.9, 0.45), border = NA)
+
+# Posterior mean prediction
+lines(time_index, Q_mean_pred, col = "darkblue", lwd = 1.2)
+
+# Observed data as small black points on top
+points(time_index, Q_obs_aligned, pch = 19, cex = 0.25, col = "black")
+
+legend("topright",
+       legend = c("Observed", "Posterior mean", "50% CI", "90% CI"),
+       col    = c("black", "darkblue",
+                  rgb(0.4,0.6,0.9,0.6), rgb(0.4,0.6,0.9,0.3)),
+       pch    = c(19,  NA, 15,  15),
+       lty    = c(NA,   1, NA,  NA),
+       lwd    = c(NA, 1.5, NA,  NA),
+       pt.cex = c(0.8, NA,  2,   2),
+       bty    = "n", cex = 0.85)
+
+# ---------------------------------------------------------------------------
+# 12b. Spaghetti plot — 50 individual realisations
+#      Shows the spread of full hydrographs rather than just quantile bands.
+#      Useful for detecting whether uncertainty is smooth or "jumpy" in time.
+# ---------------------------------------------------------------------------
+par(mfrow = c(1, 1), mar = c(4, 4, 3, 1))
+
+plot(time_index, Q_obs_aligned, type = "l", lwd = 2, col = "black",
+     ylim = c(0, y_max),
+     xlab = "Date", ylab = "Discharge (m³/s)",
+     main = "Case 1: Spaghetti Plot (50 realisations)")
+
+for (i in 1:min(50, n_pred)) {
+  lines(time_index, Q_pred_matrix[i, ], col = rgb(0, 0.3, 0.8, 0.12))
+}
+lines(time_index, Q_obs_aligned, lwd = 2, col = "black")  # redraw on top
+
+legend("topright",
+       legend = c("Observed", "Predictive realisations"),
+       col    = c("black", rgb(0, 0.3, 0.8, 0.5)),
+       lwd    = c(2, 1), bty = "n")
+
+# ---------------------------------------------------------------------------
+# 12c. Flow Duration Curve (FDC)
+#      Sorts flows from highest to lowest and plots against exceedance
+#      probability. Reveals whether the model captures the FULL distribution
+#      of flows (extremes + low flows), not just timing.
+# ---------------------------------------------------------------------------
+Q_obs_sorted    <- sort(Q_obs_aligned, decreasing = TRUE)
+exceedance_prob <- seq_along(Q_obs_sorted) / length(Q_obs_sorted)
+
+# For each predictive realisation, compute the FDC
+Q_pred_fdc <- apply(Q_pred_matrix, 1, function(x) {
+  quantile(x, probs = 1 - exceedance_prob, na.rm = TRUE)
+})
+
+par(mfrow = c(1, 1), mar = c(4, 4, 3, 1))
+
+plot(exceedance_prob, Q_obs_sorted,
+     type = "l", lwd = 3, col = "black",
+     log  = "y",   # log y-axis: better separation of low/high flow regimes
+     xlab = "Exceedance probability",
+     ylab = "Discharge (m³/s) — log scale",
+     main = "Case 1: Flow Duration Curve — Observed vs Predictive Ensemble")
+
+# Overlay every 10th predictive FDC (semi-transparent blue)
+for (i in seq(1, n_pred, by = 5)) {
+  lines(exceedance_prob, Q_pred_fdc[, i], col = rgb(0, 0.3, 0.8, 0.15))
+}
+lines(exceedance_prob, Q_obs_sorted, lwd = 3, col = "black")
+
+legend("topright",
+       legend = c("Observed FDC", "Predictive ensemble"),
+       col    = c("black", rgb(0, 0.3, 0.8, 0.5)),
+       lwd    = c(3, 1), bty = "n")
+
+
+# =============================================================================
+# STEP 13: COVERAGE STATISTICS AND PERFORMANCE METRICS
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# 13a. Empirical coverage
+#      A well-calibrated model: ~50% of obs fall in 50% CI, ~90% in 90% CI.
+#      Undercoverage (e.g. 35% in 50% band) → underestimating uncertainty.
+#      Overcoverage (e.g. 70% in 50% band) → overestimating uncertainty.
+# ---------------------------------------------------------------------------
+cov_50 <- mean(Q_obs_aligned >= Q_lower_50 &
+                 Q_obs_aligned <= Q_upper_50, na.rm = TRUE)
+cov_90 <- mean(Q_obs_aligned >= Q_lower_90 &
+                 Q_obs_aligned <= Q_upper_90, na.rm = TRUE)
+
+cat(sprintf("Empirical coverage — 50%% CI: %.1f%%  (target: 50%%)\n",
+            cov_50 * 100))
+cat(sprintf("Empirical coverage — 90%% CI: %.1f%%  (target: 90%%)\n\n",
+            cov_90 * 100))
+
+# ---------------------------------------------------------------------------
+# 13b. NSE and KGE computed over the posterior ensemble
+#      Report median + 90% credible interval across posterior samples.
+#      This treats model performance ITSELF as uncertain.
+# ---------------------------------------------------------------------------
+
+# Use deterministic simulations (without noise) for NSE/KGE
+# — we want to evaluate the model's fit, not the total predictive noise
+
+Q_obs_mean <- mean(Q_obs_aligned, na.rm = TRUE)
+NSE_vals   <- numeric(n_pred)
+KGE_vals   <- numeric(n_pred)
+
+for (i in seq_len(n_pred)) {
+  # Use the MEAN of each log-normal draw (= exp(log(Q_sim) + sigma²/2))
+  # but here we re-run deterministically for cleaner NSE/KGE
+  theta_i <- samples[pred_idx[i], ]
+  Q_sim_x <- gr4j_sim(P_xts, T_xts, PET_xts, theta_i[1:6], area_km2)
+  m_i     <- merge(Q_sim_x, Q_obs_xts, all = FALSE)
+  m_i     <- m_i[!apply(is.na(m_i), 1, any), ]
+  Qs <- as.numeric(m_i[, 1])
+  Qo <- as.numeric(m_i[, 2])
+  
+  # Nash-Sutcliffe Efficiency: 1 = perfect; 0 = no better than obs mean
+  NSE_vals[i] <- 1 - sum((Qo - Qs)^2) / sum((Qo - Q_obs_mean)^2)
+  
+  # Kling-Gupta Efficiency: balances correlation, bias, variability
+  r     <- cor(Qs, Qo, use = "complete.obs")
+  alpha <- sd(Qs, na.rm=TRUE) / sd(Qo, na.rm=TRUE)   # variability ratio
+  beta  <- mean(Qs, na.rm=TRUE) / mean(Qo, na.rm=TRUE) # bias ratio
+  KGE_vals[i] <- 1 - sqrt((r-1)^2 + (alpha-1)^2 + (beta-1)^2)
+}
+
+cat(sprintf("NSE — median: %.3f,  90%% CI: [%.3f, %.3f]\n",
+            median(NSE_vals),
+            quantile(NSE_vals, 0.05), quantile(NSE_vals, 0.95)))
+cat(sprintf("KGE — median: %.3f,  90%% CI: [%.3f, %.3f]\n\n",
+            median(KGE_vals),
+            quantile(KGE_vals, 0.05), quantile(KGE_vals, 0.95)))
+
+# Plot NSE and KGE distributions
+par(mfrow = c(1, 2))
+hist(NSE_vals, breaks = 20, col = "lightblue", border = "white",
+     main = "Case 1: NSE distribution", xlab = "NSE")
+abline(v = median(NSE_vals), col = "red", lwd = 2, lty = 2)
+
+hist(KGE_vals, breaks = 20, col = "lightgreen", border = "white",
+     main = "Case 1: KGE distribution", xlab = "KGE")
+abline(v = median(KGE_vals), col = "red", lwd = 2, lty = 2)
+par(mfrow = c(1, 1))
+
+
+# =============================================================================
+# STEP 14: RESIDUAL DIAGNOSTICS
+# =============================================================================
+#
+# Residuals are computed on the ORIGINAL (untransformed) scale using the
+# posterior mean parameter set, to assess the adequacy of model fit.
+# In log-normal world, "residual" most naturally = log(Q_obs) - log(Q_sim),
+# i.e. the log-ratio. We compute both for completeness.
+
+theta_mean   <- colMeans(samples)
+Q_sim_mean_x <- gr4j_sim(P_xts, T_xts, PET_xts, theta_mean[1:6], area_km2)
+merged_resid <- merge(Q_sim_mean_x, Q_obs_xts, all = FALSE)
+merged_resid <- merged_resid[!apply(is.na(merged_resid), 1, any), ]
+
+Q_sim_pm <- pmax(as.numeric(merged_resid[, 1]), 1e-9)  # posterior mean sim
+Q_obs_pm <- as.numeric(merged_resid[, 2])
+valid_pm  <- Q_obs_pm > 0
+
+# Log-space residuals (natural for log-normal errors)
+log_resid <- log(Q_obs_pm[valid_pm]) - log(Q_sim_pm[valid_pm])
+
+par(mfrow = c(2, 2), mar = c(4, 4, 3, 1))
+
+# (a) Log-residual vs log-fitted value
+plot(log(Q_sim_pm[valid_pm]), log_resid,
+     pch = 19, cex = 0.5, col = rgb(0.2, 0.4, 0.7, 0.5),
+     xlab = "log(Q_sim) — posterior mean",
+     ylab = "log-residual  [log(Q_obs) - log(Q_sim)]",
+     main = "Log-residuals vs Log-fitted")
+abline(h = 0, col = "red", lty = 2, lwd = 2)
+lines(lowess(log(Q_sim_pm[valid_pm]), log_resid), col = "orange", lwd = 2)
+# Expect: random scatter around zero. Systematic curve → wrong model structure.
+# Funnel pattern → heteroscedasticity in log-space (consider hetero AR1 model).
+
+# (b) ACF of log-residuals
+acf(log_resid, lag.max = 40, col = "steelblue",
+    main = "ACF of log-residuals")
+# Significant lags beyond lag 0 → temporal autocorrelation not captured.
+# Motivates switching to Case 2 (AR1 errors).
+
+# (c) Normal Q-Q plot of log-residuals
+qqnorm(log_resid, pch = 19, cex = 0.5, col = "steelblue",
+       main = "Q-Q Plot: log-residuals")
+qqline(log_resid, col = "red", lwd = 2)
+# Points on the diagonal → log-normal assumption holds.
+# Curved S-shape → heavier tails than normal → consider Student-t.
+
+# (d) Histogram of log-residuals
+hist(log_resid, breaks = 30, probability = TRUE,
+     col = "lightblue", border = "white",
+     main = "Histogram of log-residuals", xlab = "log-residual")
+curve(dnorm(x, mean = 0, sd = sd(log_resid)), add = TRUE,
+      col = "red", lwd = 2)
+# Red curve = N(0, σ²_log) density. Good fit = histogram follows red curve.
+
+par(mfrow = c(1, 1))
+
+# Shapiro-Wilk normality test on a subsample (test is for small samples)
+sw_size    <- min(5000, length(log_resid))
+sw_indices <- sample(seq_along(log_resid), sw_size)
+sw_test    <- shapiro.test(log_resid[sw_indices])
+cat(sprintf("Shapiro-Wilk normality test on log-residuals: W=%.4f, p=%.4f\n",
+            sw_test$statistic, sw_test$p.value))
+cat("  p > 0.05: cannot reject normality (log-normal assumption holds)\n")
+cat("  p < 0.05: departure from normality detected \n\n")
+
+# Ljung-Box test for autocorrelation in log-residuals
+lb_test <- Box.test(log_resid, lag = 10, type = "Ljung-Box")
+cat(sprintf("Ljung-Box autocorrelation test (lag 10): stat=%.2f, p=%.4f\n",
+            lb_test$statistic, lb_test$p.value))
+cat("  p > 0.05: no significant autocorrelation detected\n")
+cat("  p < 0.05: significant autocorrelation → consider Case 2 (AR1)\n\n")
+
+cat("=== Case 1 complete ===\n")
+
+```
+### 6.3.2 GR4J Model with Gaussian Heteroscedastic and AR(1) Autocorrelated Errors
+```r
+# =============================================================================
+# BAYESIAN CALIBRATION OF GR4J — CASE 2: HETEROSCEDASTIC + AR(1) ERRORS
+# =============================================================================
+#
+# PURPOSE:
+#   This script calibrates the GR4J model using a statistically richer error
+#   model that accounts for two common features of real hydrologic residuals:
+#
+#   1. HETEROSCEDASTICITY: The residual standard deviation is NOT constant —
+#      it grows with simulated flow magnitude. Large floods have larger
+#      absolute errors than small baseflows. We model this as:
+#        sigma_ε(t) = a * Q_sim(t) + b
+#      where 'a' scales error with flow and 'b' is the baseline (minimum) SD.
+#
+#   2. TEMPORAL AUTOCORRELATION (AR(1)): Consecutive residuals are correlated.
+#      If the model underpredicts today's flow, it tends to underpredict
+#      tomorrow's too (because of storage processes, routing memory, etc.).
+#      We capture this with a first-order autoregressive process on the
+#      STANDARDISED residuals:
+#        η_t = ε_t / σ_ε(t)        (standardise → unit variance)
+#        η_t = φ · η_{t-1} + ξ_t   (AR(1), ξ_t ~ N(0, 1-φ²))
+#
+#   KEY DESIGN DECISION — AVOIDING NEGATIVE PREDICTIONS:
+#   The error model is applied in LOG-SPACE. Instead of adding additive
+#   noise to Q_sim, we:
+#     - Work with log(Q_obs) and log(Q_sim)
+#     - Build the heteroscedastic AR(1) structure on log-residuals
+#     - Exponentiate back to get strictly positive predictions
+#   This is physically motivated (multiplicative errors) and guarantees
+#   Q_pred > 0 for all samples.
+#
+# WORKFLOW OVERVIEW:
+#   Step 1  — Install and load packages
+#   Step 2  — Load data and GR4J simulator
+#   Step 3  — Define parameter bounds (prior support)
+#   Step 4  — Define the log-prior function
+#   Step 5  — Define the log-likelihood (hetero AR(1) in log-space)
+#   Step 6  — Define the log-posterior function
+#   Step 7  — Run adaptive MCMC (two-phase: burn-in tuning + main run)
+#   Step 8  — Post-processing: discard burn-in, label columns
+#   Step 9  — MCMC convergence diagnostics
+#   Step 10 — Posterior summary statistics
+#   Step 11 — Generate posterior predictive samples (NO negatives)
+#   Step 12 — Visualise: time-series bands, spaghetti, flow duration curves
+#   Step 13 — Coverage statistics and performance metrics (NSE, KGE)
+#   Step 14 — Residual diagnostics
+#
+# MODEL PARAMETERS (total = 9):
+#   Hydrological (6): X1, X2, X3, X4, TT, DDF
+#   Error model  (3): a [heteroscedastic slope, dimensionless in log-space]
+#                     b [baseline log-space SD, dimensionless]
+#                     phi [AR(1) autocorrelation coefficient, -1 < phi < 1]
+#
+# UNITS:
+#   Precipitation / PET : mm day⁻¹
+#   Temperature         : °C
+#   Streamflow          : m³ s⁻¹
+#   a, b                : dimensionless (log-space SDs)
+#   phi                 : dimensionless, must be in (-1, 1) for stationarity
+#
+# JACOBIAN NOTE:
+#   When standardising residuals η_t = ε_t / σ_ε(t), we change variables.
+#   The Jacobian of this transformation is ∏ 1/σ_ε(t), which adds a term
+#   -Σ log(σ_ε(t)) to the log-likelihood. Omitting this would produce biased
+#   estimates of 'a' and 'b'. See Section 3.5.4 of the course notes.
+#
+# AUTHORS : Adapted from Bayesian Calibration for Hydrologists course notes
+# =============================================================================
+
+
+# =============================================================================
+# STEP 1: INSTALL AND LOAD REQUIRED PACKAGES
+# =============================================================================
+
+required_packages <- c(
+  "xts",        # eXtensible Time Series: date-indexed time series objects
+  "zoo",        # Ordered observations; underpins xts
+  "adaptMCMC",  # Adaptive Metropolis MCMC (Haario et al. 2001)
+  "airGR",      # GR4J hydrological model
+  "coda"        # MCMC diagnostics: traceplot, ESS, Gelman-Rubin
+)
+
+missing_pkg <- required_packages[
+  !(required_packages %in% installed.packages()[, "Package"])
+]
+if (length(missing_pkg) > 0) {
+  message("Installing missing packages: ", paste(missing_pkg, collapse = ", "))
+  install.packages(missing_pkg)
+}
+
+suppressPackageStartupMessages({
+  library(xts)
+  library(zoo)
+  library(adaptMCMC)
+  library(airGR)
+  library(coda)
+})
+
+cat("=== All packages loaded successfully ===\n\n")
+
+
+# =============================================================================
+# STEP 2: LOAD DATA AND GR4J SIMULATOR
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# 2a. Load the GR4J simulator from GitHub
+# ---------------------------------------------------------------------------
+source(paste0(
+  "https://raw.githubusercontent.com/rarabzad/",
+  "Bayesian_Model_Calibration/refs/heads/main/docs/gr4j_sim.R"
+))
+cat("GR4J simulator loaded.\n")
+
+# ---------------------------------------------------------------------------
+# 2b. Load the L0123001 example dataset from airGR
+# ---------------------------------------------------------------------------
+data(L0123001)
+
+P_xts   <- xts(BasinObs$P,          order.by = as.Date(BasinObs$DatesR))
+PET_xts <- xts(BasinObs$E,          order.by = as.Date(BasinObs$DatesR))
+T_xts   <- xts(BasinObs$T,          order.by = as.Date(BasinObs$DatesR))
+
+# Convert observed discharge L/s → m³/s
+Q_obs_xts <- xts(BasinObs$Qls / 1000, order.by = as.Date(BasinObs$DatesR))
+
+area_km2 <- BasinInfo$BasinArea
+
+cat(sprintf(
+  "Data loaded: %d days (%s to %s), basin area = %.1f km²\n\n",
+  nrow(BasinObs),
+  format(start(P_xts), "%Y-%m-%d"),
+  format(end(P_xts),   "%Y-%m-%d"),
+  area_km2
+))
+
+
+# =============================================================================
+# STEP 3: DEFINE PARAMETER BOUNDS (SUPPORT OF THE PRIOR)
+# =============================================================================
+#
+# Nine parameters in total. The first six are the GR4J hydrological
+# parameters (same as Case 1). The last three describe the error model.
+#
+# ┌─────────────┬──────────────────────────────────────────────────────────┐
+# │ Parameter   │ Physical / statistical meaning & rationale for bounds   │
+# ├─────────────┼──────────────────────────────────────────────────────────┤
+# │ X1 – X4,    │ Same as Case 1 (see Case 1 script for full descriptions)│
+# │ TT, DDF     │                                                          │
+# ├─────────────┼──────────────────────────────────────────────────────────┤
+# │ a (-)       │ Heteroscedastic slope in log-space.                     │
+# │             │ σ_ε(t) = a · log(Q_sim_t) + b                          │
+# │             │ a = 0 → constant log-space variance (like Case 1).     │
+# │             │ a > 0 → variance grows with log-flow (larger flows      │
+# │             │         have larger relative uncertainty).              │
+# │             │ Bounded [0, 1]: negative values would imply variance   │
+# │             │ shrinking with flow, which is physically unusual.       │
+# ├─────────────┼──────────────────────────────────────────────────────────┤
+# │ b (-)       │ Baseline log-space SD (minimum error regardless of      │
+# │             │ flow magnitude). Strictly positive. [1e-4, 2].         │
+# │             │ b = 0.1 means ~10% relative error at minimum.          │
+# ├─────────────┼──────────────────────────────────────────────────────────┤
+# │ phi (-)     │ AR(1) autocorrelation of standardised log-residuals.   │
+# │             │ phi = 0 → independent residuals (reduces to Case 1).   │
+# │             │ phi > 0 → positive persistence (common in hydrology).  │
+# │             │ Must satisfy |phi| < 1 for the AR(1) to be stationary. │
+# │             │ Bounded [0, 0.99]: we exclude negative values because  │
+# │             │ negative autocorrelation is unusual in streamflow.      │
+# └─────────────┴──────────────────────────────────────────────────────────┘
+
+# --- Hydrological bounds (identical to Case 1) ---
+lb_hydro <- c(1e-3,  -3,   1e-3,  0.1,  -20,   1e-3)  # lower
+ub_hydro <- c(1000,   3,   500,   10,    10,   10  )   # upper
+
+# --- Error model bounds ---
+lb_resid <- c(0,     1e-4,  0   )   # [a_lower, b_lower, phi_lower]
+ub_resid <- c(1,     2,     0.99)   # [a_upper, b_upper, phi_upper]
+
+lb <- c(lb_hydro, lb_resid)
+ub <- c(ub_hydro, ub_resid)
+
+# Parameter names (used in plots, tables, column headers)
+param_names <- c("X1", "X2", "X3", "X4", "TT", "DDF", "a", "b", "phi")
+n_params    <- length(lb)   # total = 9
+
+cat(sprintf("Parameter space: %d parameters\n", n_params))
+cat("Lower bounds:", paste(round(lb, 4), collapse = ", "), "\n")
+cat("Upper bounds:", paste(round(ub, 4), collapse = ", "), "\n\n")
+
+
+# =============================================================================
+# STEP 4: LOG-PRIOR FUNCTION
+# =============================================================================
+#
+# Independent uniform priors for all nine parameters.
+# Returns -Inf immediately if any parameter violates its hard bounds.
+# This prevents physically impossible combinations from entering the chain.
+
+log_prior <- function(theta) {
+
+  # Reject any parameter vector violating bounds (probability = 0)
+  if (any(theta < lb) | any(theta > ub)) return(-Inf)
+
+  # Sum of log-uniform densities = log of joint prior under independence
+  return(sum(dunif(theta, min = lb, max = ub, log = TRUE)))
+}
+
+
+# =============================================================================
+# STEP 5: LOG-LIKELIHOOD — HETEROSCEDASTIC AR(1) IN LOG-SPACE
+# =============================================================================
+#
+# FULL STATISTICAL MODEL:
+#
+#   Define log-space residuals:
+#     ε_t = log(Q_obs_t) - log(Q_sim_t)
+#
+#   Flow-dependent (heteroscedastic) log-space standard deviation:
+#     σ_ε(t) = a · log(Q_sim_t) + b          ... (1)
+#   (pmax ensures σ_ε > 0 even when log(Q_sim) is small/negative)
+#
+#   Standardised residuals:
+#     η_t = ε_t / σ_ε(t)                      ... (2)
+#   After this transformation, η_t has unit variance by construction.
+#
+#   AR(1) process on η_t:
+#     η_1  ~ N(0, 1)                           ... (3)  initial condition
+#     η_t  = φ · η_{t-1} + ξ_t,               ... (4)
+#            ξ_t ~ N(0, 1 - φ²)
+#   (Innovation variance = 1 - φ² maintains unit marginal variance of η_t)
+#
+#   JACOBIAN ADJUSTMENT:
+#   The log-likelihood is written in terms of η_t, but the DATA are ε_t.
+#   The change of variables ε_t → η_t introduces a Jacobian:
+#     |∂η_t/∂ε_t| = 1/σ_ε(t)
+#   Taking the log, the adjustment is: -Σ log(σ_ε(t))
+#   Without this term, 'a' and 'b' estimates are biased.
+#
+#   COMPLETE LOG-LIKELIHOOD:
+#   log p(data|θ,a,b,φ) =
+#     dnorm(η₁; 0, 1, log=T)                        [initial condition]
+#     + Σ_{t=2}^T dnorm(η_t; φ·η_{t-1}, √(1-φ²), log=T) [AR(1) terms]
+#     - Σ_t log(σ_ε(t))                               [Jacobian]
+
+log_likelihood <- function(theta) {
+
+  # --- Extract parameter groups ---
+  hydro_params <- theta[1:6]   # GR4J hydrological parameters
+  a   <- theta[7]              # Heteroscedastic slope (log-space)
+  b   <- theta[8]              # Baseline log-space SD
+  phi <- theta[9]              # AR(1) autocorrelation coefficient
+
+  # --- Hard constraints on error parameters ---
+  # a must be non-negative (variance should not decrease with flow)
+  # b must be strictly positive (there must be some minimum error)
+  # |phi| < 1 is required for AR(1) stationarity; enforced by bounds,
+  # but add explicit check for numerical safety
+  if (a < 0 || b <= 0 || abs(phi) >= 1) return(-Inf)
+
+  # --- Run GR4J model ---
+  Q_sim_xts <- tryCatch(
+    gr4j_sim(P_xts, T_xts, PET_xts, hydro_params, area_km2),
+    error = function(e) return(NULL)
+  )
+  if (is.null(Q_sim_xts)) return(-Inf)
+
+  # --- Align simulated and observed flows ---
+  merged <- merge(Q_sim_xts, Q_obs_xts, all = FALSE)
+  merged <- merged[!apply(is.na(merged), 1, any), ]
+
+  Q_sim <- as.numeric(merged[, 1])
+  Q_obs <- as.numeric(merged[, 2])
+
+  if (length(Q_obs) < 10) return(-Inf)
+
+  # --- Keep only strictly positive values in both series ---
+  # Log-likelihood requires log(Q_sim) and log(Q_obs), undefined for ≤ 0
+  valid <- Q_sim > 0 & Q_obs > 0
+  Q_sim <- Q_sim[valid]
+  Q_obs <- Q_obs[valid]
+  if (length(Q_obs) < 10) return(-Inf)
+
+  T_len <- length(Q_obs)   # number of valid time steps
+
+  # --- Step (1): Compute log-space residuals ---
+  # ε_t = log(Q_obs_t) - log(Q_sim_t) = log(Q_obs_t / Q_sim_t)
+  eps <- log(Q_obs) - log(Q_sim)
+
+  # --- Step (1): Heteroscedastic log-space standard deviation ---
+  # σ_ε(t) = a · log(Q_sim_t) + b
+  # We use log(Q_sim) as the "predictor" of uncertainty because:
+  #   - It is dimensionless (independent of flow units)
+  #   - Larger flows (higher log-flow) tend to have proportionally larger errors
+  # pmax prevents σ_ε from becoming zero or negative at very low log(Q_sim)
+  sigma_t <- pmax(a * log(Q_sim) + b, 1e-9)
+
+  # --- Step (2): Standardised residuals ---
+  # η_t = ε_t / σ_ε(t)
+  # After this transformation, under the model assumptions, η_t ~ AR(1)
+  # with unit marginal variance.
+  eta <- eps / sigma_t
+
+  # --- AR(1) innovation standard deviation ---
+  # Marginal variance of η_t = 1 (by construction via the stationary dist.)
+  # Conditional on η_{t-1}, the variance of η_t is (1 - φ²).
+  # sigma_wn is the standard deviation of the white noise innovations.
+  sigma_wn <- sqrt(1 - phi^2)   # always positive since |phi| < 1
+
+  # --- Step (3): Log-likelihood for initial observation ---
+  # η₁ ~ N(0, 1) — drawn from the stationary distribution of the AR(1)
+  ll <- dnorm(eta[1], mean = 0, sd = 1, log = TRUE)
+
+  # --- Step (4): Log-likelihood for t = 2, ..., T  (AR(1) conditional) ---
+  # η_t | η_{t-1} ~ N(φ·η_{t-1}, σ²_wn)
+  # We use vectorised dnorm for speed: the mean at each step is φ·η_{t-1}
+  if (T_len > 1) {
+    ll <- ll + sum(
+      dnorm(x    = eta[2:T_len],
+            mean = phi * eta[1:(T_len - 1)],
+            sd   = sigma_wn,
+            log  = TRUE)
+    )
+  }
+
+  # --- Jacobian adjustment: -Σ log(σ_ε(t)) ---
+  # This corrects for the change of variables from ε_t to η_t.
+  # Without it, parameters a and b would be estimated with systematic bias.
+  # See Section 3.5.4 of the course notes for the full derivation.
+  ll <- ll - sum(log(sigma_t))
+
+  # Return -Inf if any numerical issue arose
+  if (!is.finite(ll)) return(-Inf)
+
+  return(ll)
+}
+
+
+# =============================================================================
+# STEP 6: LOG-POSTERIOR FUNCTION
+# =============================================================================
+#
+# log p(θ|data) ∝ log p(data|θ) + log p(θ)
+# The normalising constant p(data) is constant w.r.t. θ and cancels in the
+# Metropolis-Hastings acceptance ratio, so we never need to compute it.
+
+log_posterior <- function(theta) {
+
+  # Evaluate prior first (cheap). Skip likelihood if theta is out of bounds.
+  lp <- log_prior(theta)
+  if (!is.finite(lp)) return(-Inf)
+
+  # Evaluate likelihood (requires running GR4J — the expensive step)
+  ll <- log_likelihood(theta)
+
+  return(lp + ll)
+}
+
+
+# =============================================================================
+# STEP 7: ADAPTIVE MCMC — TWO-PHASE STRATEGY
+# =============================================================================
+#
+# With 9 parameters (vs 7 in Case 1), finding a good proposal distribution
+# manually is harder. The two-phase adaptive approach handles this:
+#
+# Phase 1 (2000 iter, acc.rate = 0.5):
+#   High acceptance target allows broad exploration. The sampler learns the
+#   rough covariance structure of the posterior.
+#
+# Phase 2 (10000 iter, acc.rate = 0.234):
+#   Uses the learned covariance as a warm-start proposal. 23.4% acceptance
+#   is theoretically optimal for random-walk MH in high dimensions.
+#
+# INITIAL PARAMETER VALUES:
+#   Midpoint of bounds is the default. For better convergence, you could
+#   first run a deterministic optimisation (optim / pso) and use the
+#   MAP estimate as the starting point.
+
+theta_init <- (lb + ub) / 2
+
+# Initial proposal scales: 2% of parameter range per dimension
+scale_init <- pmax((ub - lb) * 0.02, 0.01)
+
+cat("=== Phase 1: Burn-in run (2000 iterations, acc.rate=0.5) ===\n")
+set.seed(20122023)
+
+burnin_result <- MCMC(
+  p        = log_posterior,
+  init     = theta_init,
+  scale    = scale_init,
+  n        = 2000,
+  adapt    = TRUE,
+  acc.rate = 0.5
+)
+
+cat(sprintf("Phase 1 acceptance rate: %.3f\n\n",
+            burnin_result$acceptance.rate))
+
+# Extract full learned covariance matrix (captures parameter correlations)
+tuned_cov <- burnin_result$cov.jump
+
+cat("=== Phase 2: Main MCMC run (10000 iterations, acc.rate=0.234) ===\n")
+set.seed(20122023)
+
+mcmc_result <- MCMC(
+  p        = log_posterior,
+  init     = theta_init,
+  scale    = tuned_cov,
+  n        = 10000,
+  adapt    = TRUE,
+  acc.rate = 0.234
+)
+
+cat(sprintf("Phase 2 acceptance rate: %.3f\n", mcmc_result$acceptance.rate))
+cat("MCMC sampling complete.\n\n")
+
+
+# =============================================================================
+# STEP 8: POST-PROCESSING — DISCARD BURN-IN, LABEL COLUMNS
+# =============================================================================
+#
+# More complex posteriors (9 params, correlated structure) often need longer
+# burn-in. We discard 70% of the chain to be conservative. If trace plots
+# look well-mixed already within the first 3000 iterations, you can reduce
+# this to 50% (burn_in = 5000).
+
+burn_in <- 7000
+
+samples     <- mcmc_result$samples[(burn_in + 1):nrow(mcmc_result$samples), ]
+colnames(samples) <- param_names
+n_retained  <- nrow(samples)
+
+cat(sprintf("Retained %d samples after discarding %d burn-in iterations.\n\n",
+            n_retained, burn_in))
+
+
+# =============================================================================
+# STEP 9: MCMC CONVERGENCE DIAGNOSTICS
+# =============================================================================
+
+samples_mcmc <- as.mcmc(samples)
+
+# ---------------------------------------------------------------------------
+# 9a. Trace plots for all 9 parameters
+# ---------------------------------------------------------------------------
+cat("--- Diagnostic: Trace plots ---\n")
+par(mfrow = c(5, 2), mar = c(2.5, 3, 2, 1), mgp = c(2, 0.7, 0))
+for (j in seq_len(n_params)) {
+  plot(samples[, j], type = "l", col = "steelblue",
+       xlab = "", ylab = param_names[j],
+       main = paste("Trace:", param_names[j]))
+  abline(h = mean(samples[, j]), col = "red", lty = 2, lwd = 1.5)
+}
+par(mfrow = c(1, 1))
+
+# ---------------------------------------------------------------------------
+# 9b. Effective Sample Size
+# ---------------------------------------------------------------------------
+ess_vals <- effectiveSize(samples_mcmc)
+cat("\nEffective Sample Sizes (ESS):\n")
+print(round(ess_vals))
+cat(sprintf("Minimum ESS: %.0f  (target: > 200, ideally > 1000)\n\n",
+            min(ess_vals)))
+
+# Low ESS (< 100) for the AR(1) parameter phi or the error model parameters
+# a and b is common — these are harder to identify than hydrological params.
+# If ESS is too low, increase n in Phase 2 or add thinning.
+
+# ---------------------------------------------------------------------------
+# 9c. Autocorrelation plots for error model parameters (often more correlated)
+# ---------------------------------------------------------------------------
+par(mfrow = c(3, 3), mar = c(3, 3, 2, 1))
+for (j in seq_len(n_params)) {
+  acf(samples[, j], lag.max = 40, col = "steelblue",
+      main = paste("ACF:", param_names[j]))
+}
+par(mfrow = c(1, 1))
+
+
+# =============================================================================
+# STEP 10: POSTERIOR SUMMARY STATISTICS
+# =============================================================================
+
+cat("=== Posterior Summary ===\n")
+
+post_mean   <- colMeans(samples)
+post_median <- apply(samples, 2, median)
+post_sd     <- apply(samples, 2, sd)
+post_ci95   <- apply(samples, 2, quantile, probs = c(0.025, 0.975))
+
+summary_df <- data.frame(
+  Parameter = param_names,
+  Mean      = round(post_mean,   4),
+  Median    = round(post_median, 4),
+  SD        = round(post_sd,     4),
+  CI_2.5    = round(post_ci95[1, ], 4),
+  CI_97.5   = round(post_ci95[2, ], 4),
+  row.names = NULL
+)
+print(summary_df)
+cat("\n")
+
+# Interpretation guidance for error model parameters
+cat("--- Interpretation of error model posteriors ---\n")
+cat(sprintf("  a (hetero slope) : median=%.3f — variance %s with flow\n",
+            post_median["a"],
+            if (post_median["a"] > 0.05) "clearly increases" else "barely changes"))
+cat(sprintf("  b (baseline SD)  : median=%.3f — minimum ~%.1f%% relative error\n",
+            post_median["b"], post_median["b"] * 100))
+cat(sprintf("  phi (AR1 coeff)  : median=%.3f — %s temporal correlation\n",
+            post_median["phi"],
+            if (post_median["phi"] > 0.3) "notable" else "weak"))
+cat("\n")
+
+# ---------------------------------------------------------------------------
+# Marginal posterior density plots
+# ---------------------------------------------------------------------------
+par(mfrow = c(3, 3), mar = c(4, 3, 2, 1))
+for (j in seq_len(n_params)) {
+  d <- density(samples[, j])
+  plot(d, col = "steelblue", lwd = 2,
+       main = paste("Posterior:", param_names[j]),
+       xlab = param_names[j], ylab = "Density")
+  ci <- post_ci95[, j]
+  in_ci <- d$x >= ci[1] & d$x <= ci[2]
+  polygon(c(d$x[in_ci], rev(d$x[in_ci])),
+          c(d$y[in_ci], rep(0, sum(in_ci))),
+          col = rgb(0.27, 0.51, 0.71, 0.3), border = NA)
+  abline(v = post_mean[j], col = "red", lty = 2, lwd = 1.5)
+}
+par(mfrow = c(1, 1))
+
+# ---------------------------------------------------------------------------
+# Pairwise scatter plots for all 9 parameters
+# Pay special attention to a-b and phi-a correlations.
+# ---------------------------------------------------------------------------
+pairs(samples,
+      pch    = 19,
+      col    = rgb(0, 0, 1, 0.06),
+      cex    = 0.3,
+      main   = "Joint Posterior (Case 2: Hetero AR1)",
+      labels = param_names)
+
+
+# =============================================================================
+# STEP 11: GENERATE POSTERIOR PREDICTIVE SAMPLES  (NO NEGATIVE FLOWS)
+# =============================================================================
+#
+# MECHANISM (log-space AR(1) noise generation):
+#
+#   For each posterior draw θ⁽ⁱ⁾ = (X1,...,DDF, a, b, phi):
+#
+#   1. Run GR4J → Q_sim⁽ⁱ⁾                           (deterministic)
+#
+#   2. Compute σ_ε(t)⁽ⁱ⁾ = a⁽ⁱ⁾ · log(Q_sim⁽ⁱ⁾_t) + b⁽ⁱ⁾
+#
+#   3. Generate AR(1) standardised residuals:
+#        η₁ ~ N(0, 1)
+#        η_t = φ · η_{t-1} + ξ_t,   ξ_t ~ N(0, 1-φ²)
+#
+#   4. Transform to raw log-space residuals:
+#        ε_t = σ_ε(t) · η_t
+#
+#   5. Add to log(Q_sim) and exponentiate:
+#        log(Q_pred_t) = log(Q_sim_t) + ε_t
+#        Q_pred_t      = exp(log(Q_pred_t))   ← ALWAYS > 0
+#
+# This exactly reverses the likelihood structure, so calibration and
+# prediction are fully self-consistent.
+
+n_pred   <- 200
+pred_idx <- sample(seq_len(n_retained), n_pred, replace = FALSE)
+
+# Get time axis by running model once
+Q_sim_ref  <- gr4j_sim(P_xts, T_xts, PET_xts, samples[1, 1:6], area_km2)
+merged_ref <- merge(Q_sim_ref, Q_obs_xts, all = FALSE)
+merged_ref <- merged_ref[!apply(is.na(merged_ref), 1, any), ]
+time_index    <- index(merged_ref)
+n_timesteps   <- length(time_index)
+Q_obs_aligned <- as.numeric(merged_ref[, 2])
+
+Q_pred_matrix <- matrix(NA_real_, nrow = n_pred, ncol = n_timesteps)
+
+cat(sprintf("Generating %d posterior predictive samples (AR1 + hetero)...\n",
+            n_pred))
+
+for (i in seq_len(n_pred)) {
+
+  theta_i      <- samples[pred_idx[i], ]
+  hydro_params <- theta_i[1:6]
+  a_i   <- theta_i[7]
+  b_i   <- theta_i[8]
+  phi_i <- theta_i[9]
+
+  # Run GR4J deterministic simulation
+  Q_sim_xts_i <- gr4j_sim(P_xts, T_xts, PET_xts, hydro_params, area_km2)
+  merged_i    <- merge(Q_sim_xts_i, Q_obs_xts, all = FALSE)
+  merged_i    <- merged_i[!apply(is.na(merged_i), 1, any), ]
+  Q_sim_i     <- pmax(as.numeric(merged_i[, 1]), 1e-9)
+  T_len_i     <- length(Q_sim_i)
+
+  # Compute flow-dependent log-space standard deviation [eq. (1)]
+  sigma_t_i <- pmax(a_i * log(Q_sim_i) + b_i, 1e-9)
+
+  # Innovation SD for AR(1) process
+  # Conditional variance = 1 - φ²; take sqrt for SD
+  sigma_wn_i <- sqrt(1 - phi_i^2)
+
+  # Generate standardised AR(1) residuals [eqs. (3) and (4)]
+  eta_i    <- numeric(T_len_i)
+  eta_i[1] <- rnorm(1, mean = 0, sd = 1)   # initial from stationary dist.
+
+  for (t in 2:T_len_i) {
+    # One-step AR(1) update: η_t = φ·η_{t-1} + ξ_t
+    eta_i[t] <- phi_i * eta_i[t - 1] + rnorm(1, mean = 0, sd = sigma_wn_i)
+  }
+
+  # Transform to raw log-space residuals [eq. (2) reversed]: ε_t = σ_ε(t)·η_t
+  eps_i <- sigma_t_i * eta_i
+
+  # Add residuals in log-space, then exponentiate back [Step 5]
+  # Q_pred = exp(log(Q_sim) + ε) = Q_sim · exp(ε) > 0 always
+  log_Q_pred_i           <- log(Q_sim_i) + eps_i
+  Q_pred_matrix[i, seq_len(T_len_i)] <- exp(log_Q_pred_i)
+}
+
+# Confirm no negative values
+n_negative <- sum(Q_pred_matrix < 0, na.rm = TRUE)
+cat(sprintf("Negative flow values in predictive samples: %d (should be 0)\n\n",
+            n_negative))
+
+# Summary statistics across the predictive ensemble
+Q_mean_pred   <- colMeans(Q_pred_matrix, na.rm = TRUE)
+Q_median_pred <- apply(Q_pred_matrix, 2, median,   na.rm = TRUE)
+Q_lower_50    <- apply(Q_pred_matrix, 2, quantile, probs = 0.25, na.rm = TRUE)
+Q_upper_50    <- apply(Q_pred_matrix, 2, quantile, probs = 0.75, na.rm = TRUE)
+Q_lower_90    <- apply(Q_pred_matrix, 2, quantile, probs = 0.05, na.rm = TRUE)
+Q_upper_90    <- apply(Q_pred_matrix, 2, quantile, probs = 0.95, na.rm = TRUE)
+
+
+# =============================================================================
+# STEP 12: VISUALISE POSTERIOR PREDICTIVE CHECK (PPC)
+# =============================================================================
+
+y_max <- max(c(Q_obs_aligned, Q_upper_90), na.rm = TRUE) * 1.05
+
+# ---------------------------------------------------------------------------
+# 12a. Time-series plot with shaded 50% and 90% credible bands
+# ---------------------------------------------------------------------------
+par(mfrow = c(1, 1), mar = c(4, 4, 3, 1))
+
+plot(time_index, Q_obs_aligned, type = "n",
+     ylim = c(0, y_max),
+     xlab = "Date", ylab = "Discharge (m³/s)",
+     main = "Case 2 (Hetero + AR(1)): Posterior Predictive Check")
+
+polygon(c(time_index, rev(time_index)),
+        c(Q_lower_90, rev(Q_upper_90)),
+        col = rgb(0.8, 0.3, 0.1, 0.2), border = NA)
+
+polygon(c(time_index, rev(time_index)),
+        c(Q_lower_50, rev(Q_upper_50)),
+        col = rgb(0.8, 0.3, 0.1, 0.4), border = NA)
+
+lines(time_index, Q_mean_pred, col = "darkred", lwd = 1.2)
+points(time_index, Q_obs_aligned, pch = 19, cex = 0.25, col = "black")
+
+legend("topright",
+       legend = c("Observed", "Posterior mean", "50% CI", "90% CI"),
+       col    = c("black", "darkred",
+                  rgb(0.8,0.3,0.1,0.5), rgb(0.8,0.3,0.1,0.25)),
+       pch    = c(19, NA, 15, 15), lty = c(NA, 1, NA, NA),
+       lwd    = c(NA, 1.5, NA, NA), pt.cex = c(0.8, NA, 2, 2),
+       bty = "n", cex = 0.85)
+
+# ---------------------------------------------------------------------------
+# 12b. Spaghetti plot — 50 realisations
+#      With AR(1) errors, individual realisations show SMOOTH temporal
+#      correlation structure — the "spaghetti" strands are correlated in
+#      time rather than noisy, which is physically more realistic.
+# ---------------------------------------------------------------------------
+par(mfrow = c(1, 1), mar = c(4, 4, 3, 1))
+
+plot(time_index, Q_obs_aligned, type = "l", lwd = 2, col = "black",
+     ylim = c(0, y_max),
+     xlab = "Date", ylab = "Discharge (m³/s)",
+     main = "Case 2: Spaghetti Plot — notice smooth correlated strands")
+
+for (i in 1:min(50, n_pred)) {
+  lines(time_index, Q_pred_matrix[i, ], col = rgb(0.7, 0.1, 0.1, 0.12))
+}
+lines(time_index, Q_obs_aligned, lwd = 2, col = "black")
+
+legend("topright",
+       legend = c("Observed", "Predictive realisations"),
+       col    = c("black", rgb(0.7, 0.1, 0.1, 0.5)),
+       lwd    = c(2, 1), bty = "n")
+
+# ---------------------------------------------------------------------------
+# 12c. Flow Duration Curve
+# ---------------------------------------------------------------------------
+Q_obs_sorted    <- sort(Q_obs_aligned, decreasing = TRUE)
+exceedance_prob <- seq_along(Q_obs_sorted) / length(Q_obs_sorted)
+
+Q_pred_fdc <- apply(Q_pred_matrix, 1, function(x) {
+  quantile(x, probs = 1 - exceedance_prob, na.rm = TRUE)
+})
+
+par(mfrow = c(1, 1), mar = c(4, 4, 3, 1))
+
+plot(exceedance_prob, Q_obs_sorted,
+     type = "l", lwd = 3, col = "black",
+     log  = "y",
+     xlab = "Exceedance probability",
+     ylab = "Discharge (m³/s) — log scale",
+     main = "Case 2: Flow Duration Curve — Observed vs Ensemble")
+
+for (i in seq(1, n_pred, by = 5)) {
+  lines(exceedance_prob, Q_pred_fdc[, i], col = rgb(0.7, 0.1, 0.1, 0.15))
+}
+lines(exceedance_prob, Q_obs_sorted, lwd = 3, col = "black")
+
+legend("topright",
+       legend = c("Observed FDC", "Predictive ensemble"),
+       col    = c("black", rgb(0.7, 0.1, 0.1, 0.5)),
+       lwd    = c(3, 1), bty = "n")
+
+
+# =============================================================================
+# STEP 13: COVERAGE STATISTICS AND PERFORMANCE METRICS
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# 13a. Empirical coverage
+# ---------------------------------------------------------------------------
+cov_50 <- mean(Q_obs_aligned >= Q_lower_50 &
+               Q_obs_aligned <= Q_upper_50, na.rm = TRUE)
+cov_90 <- mean(Q_obs_aligned >= Q_lower_90 &
+               Q_obs_aligned <= Q_upper_90, na.rm = TRUE)
+
+cat(sprintf("Empirical coverage — 50%% CI: %.1f%%  (target: 50%%)\n",
+            cov_50 * 100))
+cat(sprintf("Empirical coverage — 90%% CI: %.1f%%  (target: 90%%)\n\n",
+            cov_90 * 100))
+
+# Coverage by flow regime (low / medium / high thirds)
+Q_terciles   <- quantile(Q_obs_aligned, probs = c(1/3, 2/3), na.rm = TRUE)
+regime_label <- cut(Q_obs_aligned,
+                    breaks = c(-Inf, Q_terciles, Inf),
+                    labels = c("Low", "Medium", "High"))
+
+for (rg in c("Low", "Medium", "High")) {
+  idx  <- !is.na(regime_label) & regime_label == rg
+  cov  <- mean(Q_obs_aligned[idx] >= Q_lower_90[idx] &
+               Q_obs_aligned[idx] <= Q_upper_90[idx], na.rm = TRUE)
+  cat(sprintf("  90%% coverage — %-6s flows: %.1f%%\n", rg, cov * 100))
+}
+cat("\n")
+
+# ---------------------------------------------------------------------------
+# 13b. NSE and KGE over the posterior ensemble
+# ---------------------------------------------------------------------------
+Q_obs_mean <- mean(Q_obs_aligned, na.rm = TRUE)
+NSE_vals   <- numeric(n_pred)
+KGE_vals   <- numeric(n_pred)
+
+for (i in seq_len(n_pred)) {
+  theta_i <- samples[pred_idx[i], ]
+  Q_s     <- gr4j_sim(P_xts, T_xts, PET_xts, theta_i[1:6], area_km2)
+  m_i     <- merge(Q_s, Q_obs_xts, all = FALSE)
+  m_i     <- m_i[!apply(is.na(m_i), 1, any), ]
+  Qs <- as.numeric(m_i[, 1])
+  Qo <- as.numeric(m_i[, 2])
+
+  NSE_vals[i] <- 1 - sum((Qo - Qs)^2) / sum((Qo - Q_obs_mean)^2)
+  r     <- cor(Qs, Qo, use = "complete.obs")
+  alpha <- sd(Qs, na.rm=TRUE) / sd(Qo, na.rm=TRUE)
+  beta  <- mean(Qs, na.rm=TRUE) / mean(Qo, na.rm=TRUE)
+  KGE_vals[i] <- 1 - sqrt((r-1)^2 + (alpha-1)^2 + (beta-1)^2)
+}
+
+cat(sprintf("NSE — median: %.3f,  90%% CI: [%.3f, %.3f]\n",
+            median(NSE_vals),
+            quantile(NSE_vals, 0.05), quantile(NSE_vals, 0.95)))
+cat(sprintf("KGE — median: %.3f,  90%% CI: [%.3f, %.3f]\n\n",
+            median(KGE_vals),
+            quantile(KGE_vals, 0.05), quantile(KGE_vals, 0.95)))
+
+par(mfrow = c(1, 2))
+hist(NSE_vals, breaks = 20, col = "mistyrose", border = "white",
+     main = "Case 2: NSE distribution", xlab = "NSE")
+abline(v = median(NSE_vals), col = "red", lwd = 2, lty = 2)
+hist(KGE_vals, breaks = 20, col = "mistyrose", border = "white",
+     main = "Case 2: KGE distribution", xlab = "KGE")
+abline(v = median(KGE_vals), col = "red", lwd = 2, lty = 2)
+par(mfrow = c(1, 1))
+
+
+# =============================================================================
+# STEP 14: RESIDUAL DIAGNOSTICS  (more comprehensive than Case 1)
+# =============================================================================
+#
+# For the heteroscedastic AR(1) model, the correct residuals to diagnose are
+# the STANDARDISED log-residuals η_t = ε_t / σ_ε(t).
+# Under the model, these should be:
+#   - AR(1) correlated with coefficient ≈ posterior median of phi
+#   - Otherwise approximately N(0, 1)
+# After removing the AR(1) structure (by computing innovations), the
+# residuals ξ_t = η_t - φ·η_{t-1} should be i.i.d. N(0, 1-φ²).
+
+theta_pm     <- colMeans(samples)              # posterior mean parameter set
+a_pm         <- theta_pm[7]
+b_pm         <- theta_pm[8]
+phi_pm       <- theta_pm[9]
+
+Q_sim_pm_x   <- gr4j_sim(P_xts, T_xts, PET_xts, theta_pm[1:6], area_km2)
+merged_pm    <- merge(Q_sim_pm_x, Q_obs_xts, all = FALSE)
+merged_pm    <- merged_pm[!apply(is.na(merged_pm), 1, any), ]
+
+Q_sim_pm <- pmax(as.numeric(merged_pm[, 1]), 1e-9)
+Q_obs_pm <- as.numeric(merged_pm[, 2])
+valid_pm  <- Q_sim_pm > 0 & Q_obs_pm > 0
+
+# Log-space residuals
+eps_pm      <- log(Q_obs_pm[valid_pm]) - log(Q_sim_pm[valid_pm])
+
+# Flow-dependent standard deviations using posterior mean error parameters
+sigma_pm    <- pmax(a_pm * log(Q_sim_pm[valid_pm]) + b_pm, 1e-9)
+
+# Standardised log-residuals (should be AR(1) with coeff phi_pm)
+eta_pm      <- eps_pm / sigma_pm
+
+# AR(1) innovations: ξ_t = η_t - φ·η_{t-1}  (should be i.i.d. N(0, 1-φ²))
+T_pm        <- length(eta_pm)
+xi_pm       <- eta_pm[2:T_pm] - phi_pm * eta_pm[1:(T_pm - 1)]
+sigma_wn_pm <- sqrt(1 - phi_pm^2)
+xi_std      <- xi_pm / sigma_wn_pm   # standardise to N(0,1) for checking
+
+par(mfrow = c(3, 2), mar = c(4, 4, 3, 1))
+
+# (a) Standardised log-residuals vs log-fitted values
+#     Should show random scatter around 0 — no funnel = heteroscedasticity removed
+plot(log(Q_sim_pm[valid_pm]), eta_pm,
+     pch = 19, cex = 0.4, col = rgb(0.6, 0.1, 0.1, 0.4),
+     xlab = "log(Q_sim) — posterior mean",
+     ylab = "Standardised log-residual η",
+     main = "Std. log-residual vs log-fitted\n(should be random scatter)")
+abline(h = 0, col = "red", lty = 2, lwd = 2)
+lines(lowess(log(Q_sim_pm[valid_pm]), eta_pm), col = "orange", lwd = 2)
+abline(h = c(-2, 2), col = "grey60", lty = 3)
+
+# (b) ACF of standardised log-residuals η_t
+#     Should show significant lag-1 correlation ≈ phi_pm,
+#     and decay quickly thereafter.
+acf(eta_pm, lag.max = 40, col = "steelblue",
+    main = paste0("ACF of η_t  (expect lag-1 ≈ ", round(phi_pm, 2), ")"))
+
+# (c) ACF of innovations ξ_t (AFTER removing AR(1) structure)
+#     Should be white noise — no significant autocorrelation at any lag.
+acf(xi_pm, lag.max = 40, col = "darkgreen",
+    main = "ACF of AR(1) innovations ξ_t\n(should be white noise)")
+
+# (d) Q-Q plot of standardised innovations
+#     Should follow N(0,1) line closely.
+qqnorm(xi_std, pch = 19, cex = 0.4, col = "steelblue",
+       main = "Q-Q: standardised innovations ξ_t / σ_wn\n(target: N(0,1))")
+qqline(xi_std, col = "red", lwd = 2)
+
+# (e) Histogram of innovations vs N(0,1)
+hist(xi_std, breaks = 40, probability = TRUE,
+     col = "mistyrose", border = "white",
+     main = "Histogram of standardised innovations",
+     xlab = "ξ_t / σ_wn")
+curve(dnorm(x, 0, 1), add = TRUE, col = "red", lwd = 2)
+
+# (f) Time series of innovations — check for trends / seasonality
+plot(seq_along(xi_std), xi_std, type = "l", col = "grey40",
+     xlab = "Time step", ylab = "Standardised innovation",
+     main = "Innovations over time\n(should look like white noise)")
+abline(h = 0, col = "red", lty = 2)
+abline(h = c(-3, 3), col = "grey60", lty = 3)
+
+par(mfrow = c(1, 1))
+
+# ---------------------------------------------------------------------------
+# Formal statistical tests on innovations
+# ---------------------------------------------------------------------------
+
+# Ljung-Box: test for remaining autocorrelation in innovations
+lb_test <- Box.test(xi_pm, lag = 10, type = "Ljung-Box")
+cat(sprintf("Ljung-Box on innovations (lag 10): stat=%.2f, p=%.4f\n",
+            lb_test$statistic, lb_test$p.value))
+cat("  p > 0.05: AR(1) model has removed autocorrelation ✓\n")
+cat("  p < 0.05: residual autocorrelation remains → consider AR(2) or higher\n\n")
+
+# Shapiro-Wilk: normality of innovations
+sw_n       <- min(5000, length(xi_std))
+sw_idx     <- sample(seq_along(xi_std), sw_n)
+sw_test    <- shapiro.test(xi_std[sw_idx])
+cat(sprintf("Shapiro-Wilk on innovations: W=%.4f, p=%.4f\n",
+            sw_test$statistic, sw_test$p.value))
+cat("  p > 0.05: cannot reject normality of innovations ✓\n")
+cat("  p < 0.05: non-normal innovations → consider Student-t errors\n\n")
+
+# Variance of standardised innovations should be close to 1
+cat(sprintf("Variance of standardised innovations: %.4f  (should be ~1.0)\n",
+            var(xi_std)))
 ```
 
 
